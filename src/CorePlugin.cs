@@ -20,7 +20,15 @@ namespace Ezomic.Core
     /// manifest, so a player never installs it deliberately.
     /// </summary>
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
-    [BepInProcess("valheim.exe")]
+    // No BepInProcess. It used to say valheim.exe, and that quietly defeated the entire
+    // point of this plugin: a dedicated server runs valheim_server.exe, so Core never loaded
+    // there, so the gate in NetworkPatches only ever ran on a listen host. Every dedicated
+    // server in the family was unguarded, and RPC_PeerInfo's IsServer branch - the only
+    // branch that can actually refuse a connection - was unreachable.
+    //
+    // It also broke Delve, which declares Core a hard dependency and has no BepInProcess of
+    // its own: on a dedicated server the dependency was simply absent and Delve refused to
+    // load at all.
     public class CorePlugin : BaseUnityPlugin
     {
         public const string PluginGuid = "ezomic.valheim.core";
