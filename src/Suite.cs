@@ -11,7 +11,7 @@ namespace Ezomic.Core
     /// private void Awake()
     /// {
     ///     HoardConfig.Bind(Config);
-    ///     Suite.Register(PluginGuid, PluginName, PluginVersion, Config);
+    ///     Suite.Register(PluginGuid, PluginName, PluginVersion, config);
     ///     Suite.Sync(HoardConfig.StackMultiplier);
     /// }
     /// </code>

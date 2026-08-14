@@ -37,7 +37,7 @@ namespace Ezomic.Core
             peer.m_rpc.Invoke(RpcManifest, BuildManifest());
         }
 
-        /// <summary>guid, version and requirement for every registered mod.</summary>
+        /// <summary>Guid, version and requirement for every registered mod.</summary>
         private static ZPackage BuildManifest()
         {
             ZPackage pkg = new ZPackage();
