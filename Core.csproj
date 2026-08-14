@@ -30,6 +30,9 @@
     <!-- ZPackage.Write has Vector2i/Vector2s overloads, so every Write needs this even
          though nothing here writes a vector. -->
     <Reference Include="assembly_utils"><HintPath>$(ManagedDir)\assembly_utils.dll</HintPath><Private>false</Private></Reference>
+    <!-- SoftRefAssets wraps this assembly's IAssetLoader so runtime prefabs can be
+         soft-referenced. Nothing else in Core touches it. -->
+    <Reference Include="SoftReferenceableAssets"><HintPath>$(ManagedDir)\SoftReferenceableAssets.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine"><HintPath>$(ManagedDir)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="BepInEx"><HintPath>$(BepInExCore)\BepInEx.dll</HintPath><Private>false</Private></Reference>
