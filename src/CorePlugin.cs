@@ -1,0 +1,100 @@
+using System.Collections.Generic;
+using BepInEx;
+using BepInEx.Configuration;
+using BepInEx.Logging;
+using HarmonyLib;
+
+namespace Ezomic.Core
+{
+    /// <summary>
+    /// The one place the handshake lives.
+    ///
+    /// Every mod here needs the same two things from multiplayer - refuse a client whose
+    /// version does not match, and make the host's settings the ones that count - and both
+    /// are built out of a single RPC pair on the connection. Nine copies of that would be
+    /// nine chances to get the handshake ordering wrong, and worse, nine RPCs racing each
+    /// other on the same peer. So it is registered once here and the mods declare what they
+    /// want rather than how it happens.
+    ///
+    /// This is a hard dependency of every Ezomic mod. Mod managers resolve it from the
+    /// manifest, so a player never installs it deliberately.
+    /// </summary>
+    [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
+    [BepInProcess("valheim.exe")]
+    public class CorePlugin : BaseUnityPlugin
+    {
+        public const string PluginGuid = "ezomic.valheim.core";
+        public const string PluginName = "Core";
+        public const string PluginVersion = "0.1.0";
+        public const string PluginAuthor = "Robbin Thijssen";
+
+        internal static ManualLogSource Log;
+
+        /// <summary>
+        /// Off is a supported answer. A player running these solo, or an admin who would
+        /// rather sort mismatches out by talking to people, should not be forced through a
+        /// gate that can only ever reject them.
+        /// </summary>
+        internal static ConfigEntry<bool> EnforceVersions;
+        internal static ConfigEntry<bool> EnforceConfig;
+
+        private Harmony _harmony;
+
+        private void Awake()
+        {
+            Log = Logger;
+
+            EnforceVersions = Config.Bind("Multiplayer", "EnforceVersions", true,
+                "Refuse a connection when the client and the server disagree about which "
+                + "Ezomic mods are installed, or about their versions. Turning this off does "
+                + "not make a mismatch safe; it makes it silent.");
+
+            EnforceConfig = Config.Bind("Multiplayer", "EnforceConfig", true,
+                "The host's settings win. Clients keep their own file untouched and get it "
+                + "back the moment they disconnect - nothing is overwritten on disk.");
+
+            _harmony = new Harmony(PluginGuid);
+            _harmony.PatchAll(typeof(NetworkPatches));
+            _harmony.PatchAll(typeof(ConfigSync));
+
+            Log.LogInfo(PluginName + " " + PluginVersion + " by " + PluginAuthor + " - ready.");
+        }
+
+        private void OnDestroy()
+        {
+            if (_harmony != null) _harmony.UnpatchSelf();
+        }
+    }
+
+    /// <summary>How much of a mod has to be on both ends of a connection.</summary>
+    public enum Requirement
+    {
+        /// <summary>
+        /// Both sides need it, at the same version. Anything that registers a prefab or
+        /// changes item data is this, whether it looks like it or not: a client that cannot
+        /// resolve a prefab hash discards the ZDO as junk rather than failing loudly.
+        /// </summary>
+        Everyone,
+
+        /// <summary>
+        /// Only the host needs it. Clients without it are let in, and clients *with* it are
+        /// still checked against the host - a half-installed group is the case that actually
+        /// happens, and it is worse than nobody having it.
+        /// </summary>
+        HostOnly
+    }
+
+    /// <summary>What one mod told Core about itself.</summary>
+    internal sealed class ModEntry
+    {
+        internal string Guid;
+        internal string Name;
+        internal string Version;
+        internal Requirement Requirement;
+        internal ConfigFile Config;
+
+        /// <summary>Entries the host dictates, keyed by "section.key" as sent on the wire.</summary>
+        internal readonly Dictionary<string, ConfigEntryBase> Synced =
+            new Dictionary<string, ConfigEntryBase>();
+    }
+}

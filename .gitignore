@@ -1,0 +1,16 @@
+# Build output
+bin/
+obj/
+
+# Local IDE / user files
+*.user
+*.suo
+.vs/
+.idea/
+
+# BepInEx test profile: third-party binaries, not ours to redistribute.
+# Recreate by copying the BepInEx tree from any existing profile.
+testprofile/
+
+# Packaged zips, rebuilt by ../valheim-own-profile/package.ps1
+dist/

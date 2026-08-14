@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net462</TargetFramework>
+    <AssemblyName>EzomicCore</AssemblyName>
+    <RootNamespace>Ezomic.Core</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Version>0.1.0</Version>
+    <Authors>Robbin Thijssen</Authors>
+    <Company>Thijssen Software</Company>
+    <Product>Core</Product>
+    <Description>Shared plumbing for the Ezomic mods: version gating and host-authoritative config.</Description>
+    <Copyright>Copyright (c) 2026 Robbin Thijssen</Copyright>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <DebugType>none</DebugType>
+    <NoWarn>CS0649;CS0169</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <ValheimDir Condition="'$(ValheimDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Valheim</ValheimDir>
+    <ManagedDir>$(ValheimDir)\valheim_Data\Managed</ManagedDir>
+    <ProfileDir Condition="'$(ProfileDir)' == ''">$(MSBuildProjectDirectory)\testprofile</ProfileDir>
+    <BepInExCore>$(ProfileDir)\BepInEx\core</BepInExCore>
+    <DeployDir>$(ProfileDir)\BepInEx\plugins\Core</DeployDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="assembly_valheim"><HintPath>$(ManagedDir)\assembly_valheim.dll</HintPath><Private>false</Private></Reference>
+    <!-- ZPackage.Write has Vector2i/Vector2s overloads, so every Write needs this even
+         though nothing here writes a vector. -->
+    <Reference Include="assembly_utils"><HintPath>$(ManagedDir)\assembly_utils.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(ManagedDir)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="BepInEx"><HintPath>$(BepInExCore)\BepInEx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(BepInExCore)\0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <Target Name="Deploy" AfterTargets="Build" Condition="Exists('$(ProfileDir)\BepInEx\plugins')">
+    <MakeDir Directories="$(DeployDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DeployDir)" ContinueOnError="true" />
+  </Target>
+
+</Project>
