@@ -91,6 +91,12 @@ namespace Ezomic.Core
                 CorePlugin.Log.LogInfo("Inventory rows: vanilla height is " + _base + ".");
             }
 
+            // Nothing has asked yet. Core writing 4 + 0 on the first frame, before any mod's
+            // Update has run, briefly told an inventory holding items in row 7 that it was
+            // four rows tall - harmless in practice and not a state worth passing through.
+            // A mod that later claims 0 still gets written, because it has an entry by then.
+            if (Claims.Count == 0) return;
+
             var total = Total;
             if (total == _applied) return;
 
@@ -102,13 +108,36 @@ namespace Ezomic.Core
                 return;
             }
 
+            // Never below what is actually in the grid. Releasing rows is a real operation -
+            // strip your armour and a mod that claimed rows for it gives them back - and the
+            // items standing in those rows must not be sealed off behind the new edge.
+            var wanted = Mathf.Max(_base + total, Occupied(inventory));
+
             _applied = total;
-            _height.SetValue(inventory, _base + total);
+            _height.SetValue(inventory, wanted);
 
             CorePlugin.Log.LogInfo("Inventory rows: " + _base + " + " + total + " claimed by " +
-                                   Claims.Count + " mod(s).");
+                                   Claims.Count + " mod(s)" +
+                                   (wanted > _base + total ? ", held at " + wanted + " by items in the grid" : "") + ".");
 
             Backdrop.Invalidate();
+        }
+
+        /// <summary>
+        /// One past the lowest row anything is standing in, so the grid is never cut above
+        /// its own contents. Rows given back while occupied stay until they are emptied.
+        /// </summary>
+        private static int Occupied(Inventory inventory)
+        {
+            var lowest = 0;
+
+            foreach (var item in inventory.GetAllItems())
+            {
+                if (item == null) continue;
+                if (item.m_gridPos.y + 1 > lowest) lowest = item.m_gridPos.y + 1;
+            }
+
+            return lowest;
         }
 
         /// <summary>
