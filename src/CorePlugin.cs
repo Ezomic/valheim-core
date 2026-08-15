@@ -33,7 +33,7 @@ namespace Ezomic.Core
     {
         public const string PluginGuid = "ezomic.valheim.core";
         public const string PluginName = "Core";
-        public const string PluginVersion = "0.1.0";
+        public const string PluginVersion = "0.2.0";
         public const string PluginAuthor = "Robbin Thijssen";
 
         internal static ManualLogSource Log;
@@ -44,6 +44,7 @@ namespace Ezomic.Core
         /// gate that can only ever reject them.
         /// </summary>
         internal static ConfigEntry<bool> EnforceVersions;
+        internal static ConfigEntry<bool> EnforceBuilds;
         internal static ConfigEntry<bool> EnforceConfig;
 
         private Harmony _harmony;
@@ -57,9 +58,28 @@ namespace Ezomic.Core
                 + "Ezomic mods are installed, or about their versions. Turning this off does "
                 + "not make a mismatch safe; it makes it silent.");
 
+            EnforceBuilds = Config.Bind("Multiplayer", "EnforceBuilds", true,
+                "Also refuse a connection when both ends claim the same version but are "
+                + "actually different builds.\n"
+                + "A version string is whatever was last remembered to be edited, and during "
+                + "development every build says 0.1.0 - so a client three commits ahead of "
+                + "the server matches perfectly and connects. That is the mismatch that "
+                + "actually happens, and a version check is the least able to see it. This "
+                + "compares the compiler's build id instead, which no one has to remember.\n"
+                + "Turn it off if you build the mods yourself on more than one machine: "
+                + "deterministic builds also depend on source paths, so the same commit "
+                + "checked out to a different folder produces a different id.");
+
             EnforceConfig = Config.Bind("Multiplayer", "EnforceConfig", true,
                 "The host's settings win. Clients keep their own file untouched and get it "
                 + "back the moment they disconnect - nothing is overwritten on disk.");
+
+            // Core puts itself on its own gate. It was not on it before, which left the one
+            // mod every other mod depends on as the only one whose mismatch went unreported -
+            // and a Core mismatch is worse than any of theirs, because it is the handshake
+            // itself that differs.
+            Suite.Register(PluginGuid, PluginName, PluginVersion, Config, Requirement.Everyone,
+                typeof(CorePlugin).Assembly);
 
             _harmony = new Harmony(PluginGuid);
             _harmony.PatchAll(typeof(NetworkPatches));
@@ -100,6 +120,12 @@ namespace Ezomic.Core
         internal string Version;
         internal Requirement Requirement;
         internal ConfigFile Config;
+
+        /// <summary>
+        /// Short id of the exact build, from the assembly's module version id. Empty when it
+        /// could not be read, which is compared as "unknown" rather than as a mismatch.
+        /// </summary>
+        internal string Fingerprint;
 
         /// <summary>Entries the host dictates, keyed by "section.key" as sent on the wire.</summary>
         internal readonly Dictionary<string, ConfigEntryBase> Synced =

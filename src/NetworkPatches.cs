@@ -24,8 +24,17 @@ namespace Ezomic.Core
         /// identity available this early - the ZNetPeer is not fully set up until PeerInfo,
         /// which is precisely what is being gated.
         /// </summary>
-        private static readonly Dictionary<ZRpc, Dictionary<string, string>> Received =
-            new Dictionary<ZRpc, Dictionary<string, string>>();
+        private static readonly Dictionary<ZRpc, Dictionary<string, RemoteMod>> Received =
+            new Dictionary<ZRpc, Dictionary<string, RemoteMod>>();
+
+        /// <summary>What the other end said about one of its mods.</summary>
+        private struct RemoteMod
+        {
+            public string Version;
+
+            /// <summary>Empty when the far end is an older Core that did not send one.</summary>
+            public string Fingerprint;
+        }
 
         [HarmonyPostfix]
         [HarmonyPatch(typeof(ZNet), "OnNewConnection")]
@@ -37,7 +46,7 @@ namespace Ezomic.Core
             peer.m_rpc.Invoke(RpcManifest, BuildManifest());
         }
 
-        /// <summary>Guid, version and requirement for every registered mod.</summary>
+        /// <summary>Guid, version, requirement and build id for every registered mod.</summary>
         private static ZPackage BuildManifest()
         {
             ZPackage pkg = new ZPackage();
@@ -48,14 +57,24 @@ namespace Ezomic.Core
                 pkg.Write(pair.Key);
                 pkg.Write(pair.Value.Version ?? "");
                 pkg.Write((int)pair.Value.Requirement);
+                pkg.Write(pair.Value.Fingerprint ?? "");
             }
 
             return pkg;
         }
 
+        /// <summary>
+        /// The build id is read only if the packet actually has one.
+        ///
+        /// An older Core sends three fields per mod and this one expects four, and reading
+        /// past the end of a ZPackage throws inside an RPC handler - which would drop the
+        /// connection with an end-of-stream exception instead of the readable mismatch this
+        /// whole class exists to produce. A short packet is a fact about the far end, not an
+        /// error, so it is treated as "build unknown" and only the versions are compared.
+        /// </summary>
         private static void ReceiveManifest(ZRpc rpc, ZPackage pkg)
         {
-            Dictionary<string, string> theirs = new Dictionary<string, string>();
+            var theirs = new Dictionary<string, RemoteMod>();
 
             int count = pkg.ReadInt();
             for (int i = 0; i < count; i++)
@@ -63,7 +82,10 @@ namespace Ezomic.Core
                 string guid = pkg.ReadString();
                 string version = pkg.ReadString();
                 pkg.ReadInt(); // their view of the requirement; ours is what we enforce
-                theirs[guid] = version;
+
+                string fingerprint = pkg.GetPos() < pkg.Size() ? pkg.ReadString() : "";
+
+                theirs[guid] = new RemoteMod { Version = version, Fingerprint = fingerprint };
             }
 
             Received[rpc] = theirs;
@@ -84,12 +106,12 @@ namespace Ezomic.Core
         {
             if (!CorePlugin.EnforceVersions.Value) return true;
 
-            Dictionary<string, string> theirs;
+            Dictionary<string, RemoteMod> theirs;
             if (!Received.TryGetValue(rpc, out theirs))
             {
                 // No handshake at all means the other end has no Core. That is a mismatch
                 // only if something here insists on being on both sides.
-                theirs = new Dictionary<string, string>();
+                theirs = new Dictionary<string, RemoteMod>();
             }
 
             string problem = Compare(theirs);
@@ -112,7 +134,7 @@ namespace Ezomic.Core
         /// Null when the two ends agree. Otherwise every disagreement at once, because
         /// fixing them one reconnect at a time is how a five-mod mismatch becomes an evening.
         /// </summary>
-        private static string Compare(Dictionary<string, string> theirs)
+        private static string Compare(Dictionary<string, RemoteMod> theirs)
         {
             StringBuilder problems = null;
 
@@ -120,8 +142,8 @@ namespace Ezomic.Core
             {
                 ModEntry mine = pair.Value;
 
-                string theirVersion;
-                bool present = theirs.TryGetValue(pair.Key, out theirVersion);
+                RemoteMod their;
+                bool present = theirs.TryGetValue(pair.Key, out their);
 
                 // A host-only mod is allowed to be absent on the far end. It is not allowed
                 // to be present at the wrong version - a half-updated group is the case that
@@ -135,20 +157,36 @@ namespace Ezomic.Core
                     continue;
                 }
 
-                if (theirVersion != mine.Version)
+                if (their.Version != mine.Version)
                 {
-                    Append(ref problems, "  " + mine.Name + ": they have " + theirVersion
+                    Append(ref problems, "  " + mine.Name + ": they have " + their.Version
                         + ", this end has " + mine.Version + ".");
+                    continue;
+                }
+
+                // Same version, different build. Worth its own sentence, because the obvious
+                // reading of a version match is "we are running the same thing" and here that
+                // is precisely what is false - the version says so and the compiler disagrees.
+                if (!CorePlugin.EnforceBuilds.Value) continue;
+                if (string.IsNullOrEmpty(mine.Fingerprint)
+                    || string.IsNullOrEmpty(their.Fingerprint)) continue;
+
+                if (their.Fingerprint != mine.Fingerprint)
+                {
+                    Append(ref problems, "  " + mine.Name + " " + mine.Version
+                        + " is the same version on both ends but a different build ("
+                        + their.Fingerprint + " there, " + mine.Fingerprint
+                        + " here). Rebuild whichever is behind.");
                 }
             }
 
             // Mods on their end that are not on ours. Same danger, opposite direction: their
             // prefabs would arrive as ZDOs this end cannot resolve.
-            foreach (KeyValuePair<string, string> pair in theirs)
+            foreach (KeyValuePair<string, RemoteMod> pair in theirs)
             {
                 if (Suite.Mods.ContainsKey(pair.Key)) continue;
 
-                Append(ref problems, "  " + pair.Key + " " + pair.Value
+                Append(ref problems, "  " + pair.Key + " " + pair.Value.Version
                     + " is on the other end but not this one.");
             }
 

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using BepInEx.Configuration;
 
 namespace Ezomic.Core
@@ -35,12 +37,22 @@ namespace Ezomic.Core
         /// already exist, and before anything network-facing. Awake is the right place for
         /// both.
         /// </summary>
+        /// <param name="owner">
+        /// The mod's own assembly, used for its build fingerprint. Left null it is taken from
+        /// the caller, which is right for every normal case.
+        /// </param>
+        // NoInlining is load-bearing, not decoration: GetCallingAssembly answers relative to
+        // this frame, and a JIT that inlined Register into the caller would make it report
+        // Core rather than the mod - producing one fingerprint shared by all nine, which
+        // would compare equal always and quietly detect nothing.
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public static void Register(
             string guid,
             string name,
             string version,
             ConfigFile config,
-            Requirement requirement = Requirement.Everyone)
+            Requirement requirement = Requirement.Everyone,
+            Assembly owner = null)
         {
             if (string.IsNullOrEmpty(guid)) throw new ArgumentNullException(nameof(guid));
 
@@ -58,11 +70,48 @@ namespace Ezomic.Core
             entry.Version = version;
             entry.Requirement = requirement;
             entry.Config = config;
+            entry.Fingerprint = FingerprintOf(owner ?? Assembly.GetCallingAssembly());
 
             _lastRegistered = guid;
 
             CorePlugin.Log.LogInfo("Registered " + name + " " + version
-                + " (" + requirement + ")");
+                + " (" + requirement + ") build " + entry.Fingerprint);
+        }
+
+        /// <summary>
+        /// A short, stable identity for the exact build of an assembly.
+        ///
+        /// The module version id, which the compiler stamps into every assembly it produces.
+        /// Two things make it the right choice over hashing the file. It costs a property
+        /// read rather than opening and digesting a DLL during startup. And because the .NET
+        /// SDK builds deterministically by default, it is a function of the compilation
+        /// inputs - so the same source produces the same id, and any real change produces a
+        /// different one. That is exactly the question being asked.
+        ///
+        /// Why this exists at all: the gate used to compare version strings, and a version
+        /// string is whatever somebody last remembered to edit. During development every
+        /// build says 0.1.0, so a client three commits ahead of the server matched perfectly
+        /// and connected - which is the case that actually happens, and the one a version
+        /// check is least able to see.
+        ///
+        /// Truncated for logs. Twelve hex digits is 48 bits; two different builds colliding
+        /// is not a thing that will happen to anyone.
+        /// </summary>
+        private static string FingerprintOf(Assembly assembly)
+        {
+            if (assembly == null) return "";
+
+            try
+            {
+                return assembly.ManifestModule.ModuleVersionId.ToString("N").Substring(0, 12);
+            }
+            catch (Exception e)
+            {
+                // A missing fingerprint is compared as "unknown" rather than as a mismatch,
+                // so failing here costs the build check and nothing else.
+                CorePlugin.Log.LogWarning("Could not read a build id: " + e.Message);
+                return "";
+            }
         }
 
         /// <summary>
