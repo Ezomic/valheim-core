@@ -154,6 +154,12 @@ namespace Ezomic.Core
             private static readonly List<RectTransform> Panels = new List<RectTransform>();
             private static readonly List<float> Heights = new List<float>();
 
+            // The container window sits under the player's, placed for a four row inventory.
+            // Growing the one above it leaves the two overlapping - the bottom rows of the
+            // inventory end up behind the chest panel, which is how this was noticed.
+            private static RectTransform _container;
+            private static Vector2 _containerBase;
+
             internal static void Invalidate()
             {
                 _shown = -1;
@@ -189,6 +195,9 @@ namespace Ezomic.Core
 
                 Remember(gui.m_player);
 
+                _container = gui.m_container;
+                if (_container != null) _containerBase = _container.anchoredPosition;
+
                 // Found by the sprite it draws, then filtered by width. The sprite alone is
                 // not enough: the armour and weight readouts down the right are cut from the
                 // same woodpanel art, and growing those turned two small tabs into tall bars
@@ -220,13 +229,20 @@ namespace Ezomic.Core
                 var grid = gui.m_player.GetComponentInChildren<InventoryGrid>(true);
                 if (grid == null || grid.m_elementSpace <= 0f) return;
 
+                var added = rows * grid.m_elementSpace;
+
                 for (var i = 0; i < Panels.Count; i++)
                 {
                     if (Panels[i] == null) continue;
 
-                    Panels[i].SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical,
-                                                        Heights[i] + rows * grid.m_elementSpace);
+                    Panels[i].SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, Heights[i] + added);
                 }
+
+                // Pushed down by exactly what the inventory gained, from its own captured
+                // baseline rather than by nudging it each time, so opening a chest twice does
+                // not walk it off the screen.
+                if (_container != null)
+                    _container.anchoredPosition = _containerBase + new Vector2(0f, -added);
             }
         }
     }
