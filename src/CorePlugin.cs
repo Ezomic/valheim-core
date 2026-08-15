@@ -88,6 +88,17 @@ namespace Ezomic.Core
             Log.LogInfo(PluginName + " " + PluginVersion + " by " + PluginAuthor + " - ready.");
         }
 
+        /// <summary>
+        /// Core owns the timing for anything shared, so no mod has to. Both of these are
+        /// cheap when nothing has changed - they compare against what they last wrote and
+        /// return.
+        /// </summary>
+        private void Update()
+        {
+            InventoryRows.Tick();
+            InventoryRows.Backdrop.Tick();
+        }
+
         private void OnDestroy()
         {
             if (_harmony != null) _harmony.UnpatchSelf();
