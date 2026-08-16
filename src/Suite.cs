@@ -72,6 +72,19 @@ namespace Ezomic.Core
             entry.Config = config;
             entry.Fingerprint = FingerprintOf(owner ?? Assembly.GetCallingAssembly());
 
+            // Everything, not an opt-in list.
+            //
+            // It was opt-in and almost nothing opted in: two entries across thirteen mods. A
+            // setting that changes what happens in the world has to match on both ends or the
+            // two disagree silently, and the way that shows up is not an error - it is a
+            // client on a cheapened level curve being told it has picks the server never
+            // granted, for an evening, with both logs looking reasonable.
+            //
+            // Forcing all of it is safe because of how it is applied: values are swapped in
+            // memory, never written to the player's file, and put back on disconnect. A host
+            // deciding your keybind lasts exactly as long as you are on that host.
+            AbsorbConfig(entry);
+
             _lastRegistered = guid;
 
             CorePlugin.Log.LogInfo("Registered " + name + " " + version
@@ -180,6 +193,11 @@ namespace Ezomic.Core
             }
         }
 
+        /// <summary>
+        /// Marks an entry as synced. A formality now: registering a mod syncs its whole
+        /// config, so everything is already covered. Kept because mods call it, and because
+        /// naming an entry here is a way of saying out loud that it is the host's.
+        /// </summary>
         public static void Sync(ConfigEntryBase entry)
         {
             if (entry == null) throw new ArgumentNullException(nameof(entry));
@@ -201,6 +219,27 @@ namespace Ezomic.Core
         /// The wire name of an entry. Section and key, because that pair is what a config
         /// file is addressed by and what survives a mod reordering its own fields.
         /// </summary>
+        /// <summary>
+        /// Take every entry a mod has bound. Called again when the manifest is built, because
+        /// a mod that binds config after registering would otherwise never have those entries
+        /// carried - and the order of two lines in someone's Awake is not a thing this should
+        /// depend on.
+        /// </summary>
+        internal static void AbsorbConfig(ModEntry entry)
+        {
+            if (entry == null || entry.Config == null) return;
+
+            // Through the indexer rather than TryGetEntry: that one is generic over the
+            // setting's type, which is exactly what is not known when walking a whole file.
+            foreach (ConfigDefinition definition in entry.Config.Keys)
+            {
+                ConfigEntryBase bound = entry.Config[definition];
+                if (bound == null) continue;
+
+                entry.Synced[definition.Section + "." + definition.Key] = bound;
+            }
+        }
+
         internal static string Key(ConfigEntryBase entry)
         {
             return entry.Definition.Section + "." + entry.Definition.Key;

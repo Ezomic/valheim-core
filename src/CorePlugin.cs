@@ -147,7 +147,12 @@ namespace Ezomic.Core
         internal string Data;
 
         /// <summary>Entries the host dictates, keyed by "section.key" as sent on the wire.</summary>
+        /// <summary>
+        /// Every entry of this mod's config, filled in at registration. All of it is the
+        /// host's to decide - see Suite.Register.
+        /// </summary>
         internal readonly Dictionary<string, ConfigEntryBase> Synced =
             new Dictionary<string, ConfigEntryBase>();
+
     }
 }

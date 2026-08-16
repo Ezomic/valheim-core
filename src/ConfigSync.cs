@@ -37,6 +37,10 @@ namespace Ezomic.Core
 
             foreach (KeyValuePair<string, ModEntry> pair in Suite.Mods)
             {
+                // Again here rather than only at registration: a mod that binds config after
+                // calling Register would otherwise send nothing for those entries.
+                Suite.AbsorbConfig(pair.Value);
+
                 foreach (KeyValuePair<string, ConfigEntryBase> synced in pair.Value.Synced)
                 {
                     string value;
