@@ -36,6 +36,14 @@ First published release. Earlier numbers were development only and never went ou
   refuse a connection was unreachable on the only setup where it matters.
 - **Owns the inventory height**, so two mods can both add rows without cutting each other's
   off or writing before anything has claimed space.
+- **Extra rows survive a reload.** They did not, and the failure was total and silent: the
+  grid is still its vanilla height when a character is read off disk, and `Inventory.AddItem`
+  drops any stack whose saved position is outside the current grid — no log, no error — after
+  which the next save writes the inventory back without it. Rows are applied from Core's
+  update, which cannot run until the player exists, and that is after the load. So the bottom
+  row was destroyed on every single relog, for any item, from any mod. The grid is now opened
+  wide before the load and trimmed back afterwards, never below the rows the items themselves
+  occupy.
 - Runtime prefabs can be soft-referenced, matching how the game now loads its own.
 - Both behaviours are off-switchable. Neither is on by accident.
 
