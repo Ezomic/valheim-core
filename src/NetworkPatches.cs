@@ -89,6 +89,28 @@ namespace Ezomic.Core
             }
 
             Received[rpc] = theirs;
+
+            // Tell the client why, here and not in the gate below.
+            //
+            // Found by being refused and having nowhere to look. When the versions disagree
+            // the server rejects inside its own RPC_PeerInfo and closes the connection, so the
+            // client's RPC_PeerInfo never runs and the explanation there is never reached. All
+            // the player gets is Valheim's stock "Incompatible version" screen, and the only
+            // readable account of the mismatch sits in a log on a machine they may not own.
+            //
+            // The manifest arrives before any of that, so this is the last moment the client
+            // is still listening. Logged even though the server has the authority to refuse,
+            // because being told which mod and which way round is the entire difference
+            // between a fixable problem and a mystery.
+            if (ZNet.instance != null && !ZNet.instance.IsServer()
+                && CorePlugin.EnforceVersions.Value)
+            {
+                string problem = Compare(theirs);
+                if (problem != null)
+                    CorePlugin.Log.LogError(
+                        "This server does not match your mods:\n" + problem
+                        + "\nThe server will close the connection.");
+            }
         }
 
         /// <summary>
