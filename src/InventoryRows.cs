@@ -37,6 +37,17 @@ namespace Ezomic.Core
         private static Player _player;
         private static int _base = -1;
         private static int _applied = -1;
+        private static bool _widened;
+
+        /// <summary>
+        /// How many rows the grid is opened to while a character is being read off disk.
+        ///
+        /// Generous on purpose and temporary by design: nothing is drawn during a load, and
+        /// the tick that follows trims it straight back to base + claims, never below what
+        /// the items themselves occupy. Sixteen is far more than any mod will claim and
+        /// costs one int for the length of a load.
+        /// </summary>
+        private const int LoadSlack = 16;
 
         /// <summary>
         /// Ask for <paramref name="rows"/> extra rows, replacing whatever this mod asked for
@@ -95,7 +106,11 @@ namespace Ezomic.Core
             // Update has run, briefly told an inventory holding items in row 7 that it was
             // four rows tall - harmless in practice and not a state worth passing through.
             // A mod that later claims 0 still gets written, because it has an entry by then.
-            if (Claims.Count == 0) return;
+            //
+            // Unless a load has just widened the grid, in which case this must run even with
+            // nothing claimed: the widening is temporary and something has to take it back
+            // down, or an inventory stays sixteen rows tall for the session.
+            if (Claims.Count == 0 && !_widened) return;
 
             var total = Total;
             if (total == _applied) return;
@@ -114,6 +129,7 @@ namespace Ezomic.Core
             var wanted = Mathf.Max(_base + total, Occupied(inventory));
 
             _applied = total;
+            _widened = false;
             _height.SetValue(inventory, wanted);
 
             CorePlugin.Log.LogInfo("Inventory rows: " + _base + " + " + total + " claimed by " +
@@ -127,6 +143,57 @@ namespace Ezomic.Core
         /// One past the lowest row anything is standing in, so the grid is never cut above
         /// its own contents. Rows given back while occupied stay until they are emptied.
         /// </summary>
+        /// <summary>
+        /// Opens the grid up before a character's items are read into it.
+        ///
+        /// Without this, every item in a claimed row is destroyed by loading the game, and
+        /// nothing says so. Player.Load calls m_inventory.Load, which calls AddItem per
+        /// stack, which begins:
+        ///
+        ///     if (x &lt; 0 || y &lt; 0 || x &gt;= m_width || y &gt;= m_height) return false;
+        ///
+        /// A saved position outside the current grid is dropped silently - not logged, not
+        /// an error, and then written back out on the next save. Rows are applied from
+        /// Core's Update, which cannot run until Player.m_localPlayer exists, and that is
+        /// after the load. So the grid was always four rows tall at exactly the moment it
+        /// mattered, and the bottom row was eaten on every relog.
+        ///
+        /// Found the long way round: a heartwood kept vanishing from a saved inventory, and
+        /// the first theory was that the mod registering it lost a race with the load and
+        /// left ObjectDB unable to resolve the name. That would have logged "Failed to find
+        /// item prefab" and never did. The tell was a stack of wood in a middle row
+        /// surviving the same relog that ate the bottom one - position, not identity.
+        ///
+        /// Widening rather than computing the right height, because the right height is not
+        /// knowable here. Claims can be dynamic - a mod granting rows for armour has not
+        /// been told about that armour yet at load - so any number derived from Claims is a
+        /// guess. The tick that follows already refuses to shrink below Occupied(), so the
+        /// items themselves decide what the grid ends up as, which is the correct authority.
+        /// </summary>
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(Player), nameof(Player.Load))]
+        private static void WidenBeforeLoad(Player __instance)
+        {
+            if (__instance == null) return;
+
+            var inventory = __instance.GetInventory();
+            if (inventory == null) return;
+
+            if (_height == null) _height = AccessTools.Field(typeof(Inventory), "m_height");
+            if (_height == null) return;
+
+            // The baseline is captured here, before the widening, or the next tick would
+            // read the widened value as vanilla and add every claim on top of it - and then
+            // do it again on the following load. That compounds, which is the exact failure
+            // the per-player capture at the top of Tick exists to avoid.
+            _player = __instance;
+            _base = inventory.GetHeight();
+            _applied = -1;
+            _widened = true;
+
+            _height.SetValue(inventory, _base + LoadSlack);
+        }
+
         private static int Occupied(Inventory inventory)
         {
             var lowest = 0;

@@ -86,6 +86,11 @@ namespace Ezomic.Core
             _harmony.PatchAll(typeof(ConfigSync));
             _harmony.PatchAll(typeof(ConnectError));
 
+            // InventoryRows was the one class here driven purely from Update, so it had
+            // never needed registering. It does now: its Player.Load prefix is what stops
+            // a character load destroying every item sitting in a claimed row.
+            _harmony.PatchAll(typeof(InventoryRows));
+
             Log.LogInfo(PluginName + " " + PluginVersion + " by " + PluginAuthor + " - ready.");
         }
 
