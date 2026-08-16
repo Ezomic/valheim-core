@@ -14,3 +14,7 @@ testprofile/
 
 # Packaged zips, rebuilt by ../valheim-own-profile/package.ps1
 dist/
+
+# Thunderstore packaging: staging folder and the zips tcli writes.
+package/
+build/
