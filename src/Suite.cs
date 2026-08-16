@@ -149,6 +149,21 @@ namespace Ezomic.Core
         }
 
         /// <summary>
+        /// Say why the connection about to fail is failing, on the screen that announces it.
+        ///
+        /// Valheim's refusal screen has one line per ConnectionStatus and no room for detail,
+        /// so a mod that refuses somebody can otherwise only write to a log the refused player
+        /// may not be able to read. Call this just before dropping them.
+        ///
+        /// Client-side only in effect - it is the client that draws the screen - and harmless
+        /// to call on a server, where nothing ever consumes it.
+        /// </summary>
+        public static void ExplainRefusal(string reason)
+        {
+            ConnectError.Expect(reason);
+        }
+
+        /// <summary>
         /// A tag for ConfigurationManager, so the in-game window is ordered and readable
         /// rather than alphabetical.
         ///

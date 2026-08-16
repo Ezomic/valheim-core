@@ -107,9 +107,16 @@ namespace Ezomic.Core
             {
                 string problem = Compare(theirs);
                 if (problem != null)
+                {
                     CorePlugin.Log.LogError(
                         "This server does not match your mods:\n" + problem
                         + "\nThe server will close the connection.");
+
+                    // And on the screen, not only in the log. "Incompatible version" on its
+                    // own tells a player nothing they can act on; the list of which mods and
+                    // which way round is the whole of what they need.
+                    ConnectError.Expect("This server does not match your mods:\n" + problem);
+                }
             }
         }
 

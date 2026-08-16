@@ -84,6 +84,7 @@ namespace Ezomic.Core
             _harmony = new Harmony(PluginGuid);
             _harmony.PatchAll(typeof(NetworkPatches));
             _harmony.PatchAll(typeof(ConfigSync));
+            _harmony.PatchAll(typeof(ConnectError));
 
             Log.LogInfo(PluginName + " " + PluginVersion + " by " + PluginAuthor + " - ready.");
         }
