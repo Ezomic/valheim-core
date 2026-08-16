@@ -122,6 +122,64 @@ namespace Ezomic.Core
         /// anything cosmetic alone - forcing a host's keybinds onto a guest is the kind of
         /// sync that gets a mod uninstalled.
         /// </summary>
+        /// <summary>
+        /// Declare the contents of a data file this mod reads, so the gate can tell whether
+        /// both ends have the same one.
+        ///
+        /// <code>
+        /// Suite.Data(File.ReadAllText(cardsPath));
+        /// </code>
+        ///
+        /// The version gate already catches two ends running different builds. It cannot catch
+        /// two ends running the same build over different data, and several mods here are a
+        /// DLL plus a text file that decides what the mod actually does. Boon is the case that
+        /// prompted it: its catalogue names what every rank is worth, effects are applied
+        /// client-side from that file, and the server only ever checks the rank - so a client
+        /// with an edited line gets whatever it wrote there.
+        ///
+        /// A hash rather than the file: the handshake is not the place to ship content, and
+        /// all the gate needs to know is same or not the same.
+        /// </summary>
+        public static void Data(string contents, string guid = null)
+        {
+            guid = guid ?? _lastRegistered;
+            if (string.IsNullOrEmpty(guid)) return;
+
+            ModEntry entry;
+            if (!Mods.TryGetValue(guid, out entry)) return;
+
+            entry.Data = HashOf(contents);
+            CorePlugin.Log.LogInfo(entry.Name + " data " + entry.Data + ".");
+        }
+
+        /// <summary>
+        /// A short, stable, order-dependent hash. Not cryptographic - this is a mismatch
+        /// check, not a defence against someone building a file to collide with yours, and
+        /// anyone able to do that could patch the assembly instead.
+        ///
+        /// Line endings are normalised first: the same file checked out on two machines can
+        /// differ by CRLF alone, and refusing a connection over that would be a bug rather
+        /// than a catch.
+        /// </summary>
+        private static string HashOf(string contents)
+        {
+            if (string.IsNullOrEmpty(contents)) return "";
+
+            contents = contents.Replace("\r\n", "\n").Replace("\r", "\n");
+
+            unchecked
+            {
+                uint hash = 2166136261;
+                for (int i = 0; i < contents.Length; i++)
+                {
+                    hash ^= contents[i];
+                    hash *= 16777619;
+                }
+
+                return hash.ToString("x8");
+            }
+        }
+
         public static void Sync(ConfigEntryBase entry)
         {
             if (entry == null) throw new ArgumentNullException(nameof(entry));

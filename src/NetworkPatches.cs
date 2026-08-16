@@ -34,6 +34,9 @@ namespace Ezomic.Core
 
             /// <summary>Empty when the far end is an older Core that did not send one.</summary>
             public string Fingerprint;
+
+            /// <summary>Hash of the mod's data file, when it declares one. Empty otherwise.</summary>
+            public string Data;
         }
 
         [HarmonyPostfix]
@@ -58,6 +61,7 @@ namespace Ezomic.Core
                 pkg.Write(pair.Value.Version ?? "");
                 pkg.Write((int)pair.Value.Requirement);
                 pkg.Write(pair.Value.Fingerprint ?? "");
+                pkg.Write(pair.Value.Data ?? "");
             }
 
             return pkg;
@@ -84,8 +88,9 @@ namespace Ezomic.Core
                 pkg.ReadInt(); // their view of the requirement; ours is what we enforce
 
                 string fingerprint = pkg.GetPos() < pkg.Size() ? pkg.ReadString() : "";
+                string data = pkg.GetPos() < pkg.Size() ? pkg.ReadString() : "";
 
-                theirs[guid] = new RemoteMod { Version = version, Fingerprint = fingerprint };
+                theirs[guid] = new RemoteMod { Version = version, Fingerprint = fingerprint, Data = data };
             }
 
             Received[rpc] = theirs;
@@ -206,6 +211,22 @@ namespace Ezomic.Core
                         + " is the same version on both ends but a different build ("
                         + their.Fingerprint + " there, " + mine.Fingerprint
                         + " here). Rebuild whichever is behind.");
+                    continue;
+                }
+
+                // Same build, different data file. Worth its own sentence rather than being
+                // folded into the build check: that message sends you to the compiler, and
+                // this one is a text file beside the DLL that anyone can edit. Several mods
+                // here are a DLL plus such a file, and the file is what decides what the mod
+                // does - so two ends agreeing on the build and not on the file is a real and
+                // silent disagreement.
+                if (string.IsNullOrEmpty(mine.Data) || string.IsNullOrEmpty(their.Data)) continue;
+
+                if (their.Data != mine.Data)
+                {
+                    Append(ref problems, "  " + mine.Name + " has a different data file ("
+                        + their.Data + " there, " + mine.Data
+                        + " here). Copy whichever is right to the other end.");
                 }
             }
 

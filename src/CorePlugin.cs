@@ -139,6 +139,13 @@ namespace Ezomic.Core
         /// </summary>
         internal string Fingerprint;
 
+        /// <summary>
+        /// Hash of a data file the mod reads, when it declares one through Suite.Data. Empty
+        /// for a mod that is only a DLL, and compared as "unknown" rather than a mismatch, so
+        /// an older Core on the far end costs the check and nothing else.
+        /// </summary>
+        internal string Data;
+
         /// <summary>Entries the host dictates, keyed by "section.key" as sent on the wire.</summary>
         internal readonly Dictionary<string, ConfigEntryBase> Synced =
             new Dictionary<string, ConfigEntryBase>();
