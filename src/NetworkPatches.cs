@@ -120,7 +120,10 @@ namespace Ezomic.Core
                     // And on the screen, not only in the log. "Incompatible version" on its
                     // own tells a player nothing they can act on; the list of which mods and
                     // which way round is the whole of what they need.
-                    ConnectError.Expect("This server does not match your mods:\n" + problem);
+                    // In the short form: the dialog is Valheim's own and its font is small,
+                    // and three mismatched mods in the long form was a wall of hex nobody
+                    // could read.
+                    ConnectError.Expect(Screen(theirs));
                 }
             }
         }
@@ -168,7 +171,17 @@ namespace Ezomic.Core
         /// Null when the two ends agree. Otherwise every disagreement at once, because
         /// fixing them one reconnect at a time is how a five-mod mismatch becomes an evening.
         /// </summary>
-        private static string Compare(Dictionary<string, RemoteMod> theirs)
+        /// <summary>
+        /// The same faults, said twice: short enough to read on a screen, and long enough to
+        /// act on in a log.
+        ///
+        /// The screen version came first and grew build ids and a sentence of advice per mod.
+        /// Three mismatched mods was then three long lines of hex on Valheim's own small
+        /// dialog font, and the first thing anyone said about it was that they could not read
+        /// it. What a player needs on screen is which mods and which way round; the hex
+        /// belongs in the log, where it can be compared at leisure.
+        /// </summary>
+        private static string Compare(Dictionary<string, RemoteMod> theirs, bool detailed = true)
         {
             StringBuilder problems = null;
 
@@ -186,15 +199,17 @@ namespace Ezomic.Core
                 {
                     if (mine.Requirement == Requirement.HostOnly) continue;
 
-                    Append(ref problems, "  " + mine.Name + " " + mine.Version
-                        + " is missing on the other end.");
+                    Append(ref problems, detailed
+                        ? "  " + mine.Name + " " + mine.Version + " is missing on the other end."
+                        : "  " + mine.Name + " - missing there");
                     continue;
                 }
 
                 if (their.Version != mine.Version)
                 {
-                    Append(ref problems, "  " + mine.Name + ": they have " + their.Version
-                        + ", this end has " + mine.Version + ".");
+                    Append(ref problems, detailed
+                        ? "  " + mine.Name + ": they have " + their.Version + ", this end has " + mine.Version + "."
+                        : "  " + mine.Name + " - " + their.Version + " there, " + mine.Version + " here");
                     continue;
                 }
 
@@ -207,10 +222,12 @@ namespace Ezomic.Core
 
                 if (their.Fingerprint != mine.Fingerprint)
                 {
-                    Append(ref problems, "  " + mine.Name + " " + mine.Version
-                        + " is the same version on both ends but a different build ("
-                        + their.Fingerprint + " there, " + mine.Fingerprint
-                        + " here). Rebuild whichever is behind.");
+                    Append(ref problems, detailed
+                        ? "  " + mine.Name + " " + mine.Version
+                          + " is the same version on both ends but a different build ("
+                          + their.Fingerprint + " there, " + mine.Fingerprint
+                          + " here). Rebuild whichever is behind."
+                        : "  " + mine.Name + " - different build");
                     continue;
                 }
 
@@ -224,9 +241,11 @@ namespace Ezomic.Core
 
                 if (their.Data != mine.Data)
                 {
-                    Append(ref problems, "  " + mine.Name + " has a different data file ("
-                        + their.Data + " there, " + mine.Data
-                        + " here). Copy whichever is right to the other end.");
+                    Append(ref problems, detailed
+                        ? "  " + mine.Name + " has a different data file ("
+                          + their.Data + " there, " + mine.Data
+                          + " here). Copy whichever is right to the other end."
+                        : "  " + mine.Name + " - different data file");
                 }
             }
 
@@ -241,6 +260,19 @@ namespace Ezomic.Core
             }
 
             return problems == null ? null : problems.ToString();
+        }
+
+        /// <summary>
+        /// What goes on the dialog: the list, then one instruction for all of it rather than
+        /// one per line.
+        /// </summary>
+        private static string Screen(Dictionary<string, RemoteMod> theirs)
+        {
+            string brief = Compare(theirs, false);
+            if (brief == null) return "";
+
+            return "This server does not match your mods:\n\n" + brief +
+                   "\n\nThe full detail is in your log.";
         }
 
         private static void Append(ref StringBuilder builder, string line)
