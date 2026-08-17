@@ -40,6 +40,16 @@ namespace Ezomic.Core
         private static bool _widened;
 
         /// <summary>
+        /// The height last written to the grid, which is not base + claims: it is that or
+        /// what the items occupy, whichever is larger. Anything that has to match the grid
+        /// reads this and nothing else.
+        ///
+        /// -1 until a height has actually been written, which is also the answer when the
+        /// field could not be reflected at all - in both cases the grid is still vanilla.
+        /// </summary>
+        private static int _effective = -1;
+
+        /// <summary>
         /// How many rows the grid is opened to while a character is being read off disk.
         ///
         /// Generous on purpose and temporary by design: nothing is drawn during a load, and
@@ -65,7 +75,10 @@ namespace Ezomic.Core
             _applied = -1;   // force the next tick to write
         }
 
-        /// <summary>Rows claimed by everyone, which is what the inventory grows by.</summary>
+        /// <summary>
+        /// Rows claimed by everyone. What the mods asked for, which is a floor and not the
+        /// height - see <see cref="Extra"/>.
+        /// </summary>
         public static int Total
         {
             get
@@ -73,6 +86,29 @@ namespace Ezomic.Core
                 var total = 0;
                 foreach (var kv in Claims) total += kv.Value;
                 return total;
+            }
+        }
+
+        /// <summary>
+        /// Rows the grid is actually taller than vanilla by.
+        ///
+        /// Not <see cref="Total"/>, and the difference is the whole point: a load can leave
+        /// items standing in rows nobody claimed, and the tick refuses to cut the grid above
+        /// them. One claimed row over a four row inventory holding something in row 9 is a
+        /// nine row grid, so Total says 1 and the truth is 5. Anything sized to Total in that
+        /// state is sized to a grid that is not on screen.
+        ///
+        /// Zero until a height has been written, rather than falling back to Total: at that
+        /// point nothing has grown the grid, so vanilla is the honest answer and Total would
+        /// be a promise of rows that are not there yet.
+        /// </summary>
+        public static int Extra
+        {
+            get
+            {
+                if (_base < 0 || _effective < 0) return 0;
+
+                return Mathf.Max(0, _effective - _base);
             }
         }
 
@@ -87,6 +123,7 @@ namespace Ezomic.Core
                 _player = null;
                 _base = -1;
                 _applied = -1;
+                _effective = -1;
                 return;
             }
 
@@ -98,6 +135,7 @@ namespace Ezomic.Core
                 _player = player;
                 _base = inventory.GetHeight();
                 _applied = -1;
+                _effective = -1;
 
                 CorePlugin.Log.LogInfo("Inventory rows: vanilla height is " + _base + ".");
             }
@@ -130,6 +168,7 @@ namespace Ezomic.Core
 
             _applied = total;
             _widened = false;
+            _effective = wanted;
             _height.SetValue(inventory, wanted);
 
             CorePlugin.Log.LogInfo("Inventory rows: " + _base + " + " + total + " claimed by " +
@@ -191,6 +230,12 @@ namespace Ezomic.Core
             _applied = -1;
             _widened = true;
 
+            // Deliberately not the slack height. The widening is a working space for the
+            // load and never a height anything should be drawn against; the tick that
+            // follows writes the real one, and until it does the honest answer is that
+            // nothing has grown yet.
+            _effective = -1;
+
             _height.SetValue(inventory, _base + LoadSlack);
         }
 
@@ -248,7 +293,16 @@ namespace Ezomic.Core
                     Capture(gui);
                 }
 
-                var rows = Total;
+                // Extra, not Total. This asked Claims how tall the grid was and Claims does
+                // not know: the tick clamps the height up to what the items occupy, so an
+                // inventory holding something below the claimed rows drew nine rows of slots
+                // over a panel grown by one. The lower rows had no wood behind them at all.
+                //
+                // It is also what the guard has to compare. On Total the panel only ever
+                // redrew when a mod changed its claim, so a height that moved for any other
+                // reason - a load finding items in a low row, rows given back while still
+                // occupied - left the panel where it was and nothing ever corrected it.
+                var rows = Extra;
                 if (rows == _shown) return;
 
                 _shown = rows;
