@@ -113,6 +113,17 @@ namespace Ezomic.Core
         public PlayerStatType? Stat;
 
         /// <summary>
+        /// A vanilla global key which, once the world has it, earns this deed outright.
+        ///
+        /// Boss defeats are the case this exists for: "defeated_bonemass" and its siblings are
+        /// the one world-scoped fact vanilla does record, so a whole row of world deeds needs
+        /// no counting anywhere. World scope only - a global key is a property of the world,
+        /// and reading one into a personal deed would give every character on the server the
+        /// same answer.
+        /// </summary>
+        public string Key;
+
+        /// <summary>
         /// Run once, on the client that earns it, at the moment it is earned. Optional, and
         /// null for the plain deeds that make up most of any list.
         ///
