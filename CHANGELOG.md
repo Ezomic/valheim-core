@@ -3,7 +3,7 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
-## [0.2.0] — 2026-08-16
+## [0.2.0] - 2026-08-16
 
 First published release. Earlier numbers were development only and never went out.
 
@@ -13,7 +13,7 @@ First published release. Earlier numbers were development only and never went ou
   stacks that only exist on one machine. The log names the mod and both versions, because
   the game's own rejection screen has no room to.
 - **Compares builds, not just version strings.** Two ends can both claim 1.0.0 and be
-  running different compilations, and that is the mismatch that gets missed — the number
+  running different compilations, and that is the mismatch that gets missed. The number
   matches perfectly and the connection is allowed.
 - Mods declare `Everyone` or `HostOnly`. `Everyone` is the default and the safe answer:
   anything registering a prefab is `Everyone` whether it looks like it or not, because a
@@ -38,7 +38,7 @@ First published release. Earlier numbers were development only and never went ou
   off or writing before anything has claimed space.
 - **Extra rows survive a reload.** They did not, and the failure was total and silent: the
   grid is still its vanilla height when a character is read off disk, and `Inventory.AddItem`
-  drops any stack whose saved position is outside the current grid — no log, no error — after
+  drops any stack whose saved position is outside the current grid, with no log and no error, after
   which the next save writes the inventory back without it. Rows are applied from Core's
   update, which cannot run until the player exists, and that is after the load. So the bottom
   row was destroyed on every single relog, for any item, from any mod. The grid is now opened
@@ -50,5 +50,5 @@ First published release. Earlier numbers were development only and never went ou
 ### Known limits
 
 - The gate only sees mods that call `Suite.Register`. A mod in the profile that does not is
-  invisible to it, which is by design — but it means the gate answers for this suite, not
+  invisible to it, which is by design, but it means the gate answers for this suite, not
   for the whole plugin folder.

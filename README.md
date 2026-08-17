@@ -1,6 +1,6 @@
 # Core
 
-Shared plumbing for the Ezomic mods. You do not install this on purpose — every mod in the
+Shared plumbing for the Ezomic mods. You do not install this on purpose; every mod in the
 suite depends on it, and your mod manager fetches it for you.
 
 Built against the installed game (0.221.12, Unity 6000.0.61, BepInEx 5.4.23.3, Harmony 2.9).
@@ -15,8 +15,8 @@ Two things, both about multiplayer.
 exist on one machine. Your log says exactly which mod and which versions, because the
 game's own rejection screen has no room for it.
 
-**It makes the host's settings the ones that count.** A guest keeps their own config file —
-nothing is written, nothing is overwritten — but while they are on your world they play by
+**It makes the host's settings the ones that count.** A guest keeps their own config file
+(nothing is written, nothing is overwritten) but while they are on your world they play by
 your numbers, and they get their own back the moment they disconnect.
 
 Both are off-switchable. Neither is on by accident.
@@ -43,7 +43,7 @@ private void Awake()
 ```
 
 `Register` puts the mod on the version gate. `Sync` marks the entries the host decides. A
-mod that calls neither still runs — it just gets none of this — so the nine can be wired one
+mod that calls neither still runs and just gets none of this, so the nine can be wired one
 at a time.
 
 ### Requirement
@@ -63,7 +63,7 @@ stranger ways than nobody having it.
 
 ### What to sync, and what not to
 
-Sync anything a mismatch would desync — item data, stack sizes, a range that decides whether
+Sync anything a mismatch would desync: item data, stack sizes, a range that decides whether
 two clients agree a chest is in reach.
 
 Leave keybinds, messages and anything cosmetic alone. Forcing a host's keybinds onto a guest
@@ -86,8 +86,8 @@ sends `PeerInfo`. ZRpc delivers in order on one connection, so by the time the g
 gating on data that is not there yet, and the symptom is a gate that lets the first
 connection through and works ever after.
 
-**Only the server refuses.** The client compares too, but only to write a readable log —
-there is exactly one place a connection dies, and it is `rpc.Invoke("Error",
+**Only the server refuses.** The client compares too, but only to write a readable log.
+There is exactly one place a connection dies, and it is `rpc.Invoke("Error",
 ConnectionStatus.ErrorVersion)` on the server.
 
 **Every disagreement is reported at once.** Fixing them one reconnect at a time is how a
