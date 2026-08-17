@@ -145,7 +145,7 @@ namespace Ezomic.Core
         ///
         /// The version gate already catches two ends running different builds. It cannot catch
         /// two ends running the same build over different data, and several mods here are a
-        /// DLL plus a text file that decides what the mod actually does. Boon is the case that
+        /// DLL plus a text file that decides what the mod actually does. Rist is the case that
         /// prompted it: its catalogue names what every rank is worth, effects are applied
         /// client-side from that file, and the server only ever checks the rank - so a client
         /// with an edited line gets whatever it wrote there.
