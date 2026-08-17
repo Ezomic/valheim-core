@@ -5,11 +5,11 @@
     <AssemblyName>EzomicCore</AssemblyName>
     <RootNamespace>Ezomic.Core</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Authors>Robbin Thijssen</Authors>
     <Company>Thijssen Software</Company>
     <Product>Core</Product>
-    <Description>Shared plumbing for the Ezomic mods: version gating and host-authoritative config.</Description>
+    <Description>Shared plumbing for the Ezomic mods: version gating, host-authoritative config, and the deed registry.</Description>
     <Copyright>Copyright (c) 2026 Robbin Thijssen</Copyright>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
