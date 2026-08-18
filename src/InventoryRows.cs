@@ -161,10 +161,32 @@ namespace Ezomic.Core
                 return;
             }
 
+            // The height the claims actually justify. What the grid ends up as may still be
+            // taller, but only for items this could not rescue.
+            var honest = _base + total;
+
+            // Move stragglers up before measuring, or the grid can only ever shrink by luck.
+            //
+            // The rule below - never cut above an occupied row - is right and stays. On its
+            // own it is also permanent: Occupied() reads the *lowest* occupied row, so one
+            // item parked in row 9 holds all nine rows open however little you are carrying,
+            // and nothing here ever moved it. Core waited for the player to resolve a
+            // condition the player had no way of knowing about. Seen in a real session as
+            // four vanilla rows plus one claimed row displaying as nine, cleared only by
+            // emptying the pack and relogging.
+            // Only reached when the claim total changed or a load just happened, because of
+            // the early return above. That is the case that matters - the observed failure
+            // was a grid arriving from disk already held open - but it does mean emptying a
+            // stranded row mid-session does not shrink the grid until something else moves.
+            // Re-measuring every frame to catch that would walk the item list every frame
+            // for a state that resolves itself on the next login.
+            var rescued = Occupied(inventory) > honest ? Compact(inventory, honest) : 0;
+
             // Never below what is actually in the grid. Releasing rows is a real operation -
             // strip your armour and a mod that claimed rows for it gives them back - and the
             // items standing in those rows must not be sealed off behind the new edge.
-            var wanted = Mathf.Max(_base + total, Occupied(inventory));
+            // Anything Compact could not find room for still holds its row.
+            var wanted = Mathf.Max(honest, Occupied(inventory));
 
             _applied = total;
             _widened = false;
@@ -173,7 +195,8 @@ namespace Ezomic.Core
 
             CorePlugin.Log.LogInfo("Inventory rows: " + _base + " + " + total + " claimed by " +
                                    Claims.Count + " mod(s)" +
-                                   (wanted > _base + total ? ", held at " + wanted + " by items in the grid" : "") + ".");
+                                   (rescued > 0 ? ", " + rescued + " item(s) moved up" : "") +
+                                   (wanted > honest ? ", held at " + wanted + " by items in the grid" : "") + ".");
 
             Backdrop.Invalidate();
         }
@@ -206,8 +229,9 @@ namespace Ezomic.Core
         /// Widening rather than computing the right height, because the right height is not
         /// knowable here. Claims can be dynamic - a mod granting rows for armour has not
         /// been told about that armour yet at load - so any number derived from Claims is a
-        /// guess. The tick that follows already refuses to shrink below Occupied(), so the
-        /// items themselves decide what the grid ends up as, which is the correct authority.
+        /// guess. The tick that follows refuses to shrink below Occupied() and moves what it
+        /// can up out of the way first, so the items themselves decide what the grid ends up
+        /// as, which is the correct authority.
         /// </summary>
         [HarmonyPrefix]
         [HarmonyPatch(typeof(Player), nameof(Player.Load))]
@@ -237,6 +261,70 @@ namespace Ezomic.Core
             _effective = -1;
 
             _height.SetValue(inventory, _base + LoadSlack);
+        }
+
+        /// <summary>
+        /// Moves items standing at or below <paramref name="keep"/> into free slots above it,
+        /// so the rows about to be released are empty when they are released. Returns how many
+        /// were moved.
+        ///
+        /// Empty slots only, never a stack merge. Merging would have to reason about quality,
+        /// variant and world level to be correct, and getting that wrong destroys part of a
+        /// stack - which is the one failure something sitting this close to a player's
+        /// inventory cannot have. A merge would only ever help a pack that is nearly full,
+        /// and a pack that is nearly full keeps its rows, which is the old behaviour and is
+        /// safe.
+        ///
+        /// The stranded items are collected before any of them move. Walking the live list
+        /// while rewriting the very positions it is being filtered on skips half of them.
+        /// </summary>
+        private static int Compact(Inventory inventory, int keep)
+        {
+            if (keep < 1) return 0;
+
+            var stranded = new List<ItemDrop.ItemData>();
+            foreach (var item in inventory.GetAllItems())
+                if (item != null && item.m_gridPos.y >= keep) stranded.Add(item);
+
+            if (stranded.Count == 0) return 0;
+
+            var width = inventory.GetWidth();
+            var moved = 0;
+
+            foreach (var item in stranded)
+            {
+                var slot = FreeSlot(inventory, width, keep);
+
+                // Nothing above the line. Everything after this one is stranded too, so the
+                // grid keeps its height exactly as it did before this method existed.
+                if (slot.y < 0) break;
+
+                item.m_gridPos = slot;
+                moved++;
+            }
+
+            // Not Inventory.Changed(), which is private and also recomputes total weight.
+            // Nothing here adds or removes an item, so the weight cannot have changed; what
+            // has to happen is a redraw, and that is what m_onChanged is.
+            if (moved > 0 && inventory.m_onChanged != null) inventory.m_onChanged();
+
+            return moved;
+        }
+
+        /// <summary>
+        /// The first empty slot strictly above <paramref name="keep"/>.
+        ///
+        /// Hand-rolled rather than Inventory.FindEmptySlot, which is private and scans to
+        /// m_height - and m_height at this moment is still the old tall value, so it would
+        /// happily hand back a slot in the very rows being released.
+        /// </summary>
+        private static Vector2i FreeSlot(Inventory inventory, int width, int keep)
+        {
+            for (var y = 0; y < keep; y++)
+                for (var x = 0; x < width; x++)
+                    if (inventory.GetItemAt(x, y) == null) return new Vector2i(x, y);
+
+            return new Vector2i(-1, -1);
         }
 
         private static int Occupied(Inventory inventory)
