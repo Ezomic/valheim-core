@@ -173,3 +173,12 @@ you are not sure whether what you are seeing is a bug at all. Issues on
 Bring `BepInEx\LogOutput.log` if you can, and say whether you were on a server or your
 own world. The log is most of the difference between a fix and a guess, and it is written
 every session whether or not anything went wrong.
+
+## Part of the Longhouse pack
+
+This is one of [the Longhouse pack](https://thunderstore.io/c/valheim/p/Ezomic/Longhouse/),
+a pinned set of my mods that installs in one click and is what the Longhouse server runs. You
+do not need the pack to use this on its own, and nothing here behaves differently outside it.
+
+[The Discord](https://discord.gg/hJzAVaZ5wb) is where the server lives if you want to play on
+it: small, EU, hard combat difficulty and everything else vanilla.
