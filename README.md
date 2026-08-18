@@ -163,3 +163,13 @@ below the rows the items themselves occupy.
 The gate only sees mods that call `Suite.Register`. A mod in the profile that does not is
 invisible to it. That is by design, and it means the gate answers for this suite rather than
 for the whole plugin folder.
+
+## Reporting bugs
+
+[The Discord](https://discord.gg/hJzAVaZ5wb) is the fastest route, and the right one if
+you are not sure whether what you are seeing is a bug at all. Issues on
+[the repo](https://github.com/Ezomic/valheim-core) work too and suit anything long.
+
+Bring `BepInEx\LogOutput.log` if you can, and say whether you were on a server or your
+own world. The log is most of the difference between a fix and a guess, and it is written
+every session whether or not anything went wrong.
