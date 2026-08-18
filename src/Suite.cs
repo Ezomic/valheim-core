@@ -12,9 +12,9 @@ namespace Ezomic.Core
     /// <code>
     /// private void Awake()
     /// {
-    ///     HoardConfig.Bind(Config);
+    ///     YokeConfig.Bind(Config);
     ///     Suite.Register(PluginGuid, PluginName, PluginVersion, config);
-    ///     Suite.Sync(HoardConfig.StackMultiplier);
+    ///     Suite.Sync(YokeConfig.StackMultiplier);
     /// }
     /// </code>
     ///

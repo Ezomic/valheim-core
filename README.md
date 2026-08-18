@@ -10,7 +10,7 @@ Single DLL, no assets.
 
 Two things, both about multiplayer.
 
-**It refuses a connection that would break.** If the server has Hoard 1.2.0 and you have
+**It refuses a connection that would break.** If the server has Yoke 1.2.0 and you have
 1.1.0, you are turned away at the door instead of playing for an hour into stacks that only
 exist on one machine. Your log says exactly which mod and which versions, because the
 game's own rejection screen has no room for it.
@@ -35,10 +35,10 @@ Three lines, in `Awake`, after config is bound:
 ```csharp
 private void Awake()
 {
-    HoardConfig.Bind(Config);
+    YokeConfig.Bind(Config);
 
     Suite.Register(PluginGuid, PluginName, PluginVersion, Config);
-    Suite.Sync(HoardConfig.StackMultiplier, HoardConfig.StackCap);
+    Suite.Sync(YokeConfig.StackMultiplier, YokeConfig.StackCap);
 }
 ```
 
