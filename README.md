@@ -8,8 +8,7 @@ Single DLL, no assets.
 
 ## What it does
 
-Four things. Two are about multiplayer, and two are about several mods wanting the same
-thing and having to agree.
+Three things. Two are about multiplayer, and one is about two mods wanting the same field.
 
 **It refuses a connection that would break.** If the server has Yoke 1.2.0 and you have
 1.1.0, you are turned away at the door instead of playing for an hour into stacks that only
@@ -24,12 +23,9 @@ your numbers, and they get their own back the moment they disconnect.
 write the same private int, so instead they each state a number and Core adds them up and
 writes once.
 
-**It hands runtime-built prefabs to the game.** Every mod here that invents a piece, an item
-or a creature needs the same registration, and the version of it that looks correct silently
-destroys saved objects on the second world of a session. Written once, where it can be got
-right once.
+All three are off-switchable. None of them is on by accident.
 
-The two multiplayer ones are off-switchable. Neither is on by accident.
+This repo also carries `shared\Prefabs.cs`, which is **not** in the DLL - see below.
 
 ## Why it exists
 
@@ -116,32 +112,6 @@ can run the same build and disagree about what is in that file, and the gate wou
 unknown rather than as a mismatch, so an older Core on the far end costs the check and
 nothing else.
 
-### Runtime prefabs
-
-```csharp
-Prefabs.Keep(StowPost.Name, StowPost.Build, buildTool: "Hammer");
-```
-
-Core builds it once, and re-registers it into every world for as long as the game is running:
-ZNetScene's two lookups, ObjectDB when it is an item, and a tool's build menu when it is a
-piece.
-
-The reason this is Core's rather than a copy per mod is not the copies. It is that the wrong
-version of it destroys saved objects and says nothing. The scene and the item database are
-rebuilt on every world load, including logging out to the menu and back in, so a mod that
-answers "have I registered yet?" from a static bool says yes to a scene that has never heard
-of the prefab. Registration early-returns, ZNetScene cannot resolve the saved hash, and it
-discards every ZDO of that prefab as junk. No exception, no log line, and a built piece is
-gone. Everything here asks the live scene instead, which costs a dictionary read and cannot
-go stale.
-
-The prefab name is permanent, for the same reason: it *is* the hash the ZDOs are stored
-against. Renaming one destroys everything already standing in a world.
-
-The rest of it is available on its own for mods that want to place the pieces themselves -
-`Known`, `Holder`, `Clone`, `Donor`, `Register`, `RegisterItem`, `ToolPieces`, `InTool`,
-`AddToTool`.
-
 ### Extra inventory rows
 
 ```csharp
@@ -161,6 +131,34 @@ rather than adding to it, and writes the field itself.
 | `EnforceVersions` | `true` | Refuse a connection when the two ends disagree. Off does not make a mismatch safe; it makes it silent |
 | `EnforceBuilds` | `true` | Also refuse when both ends claim the same version and are different builds. Turn it off if you build the mods yourself on more than one machine, since the same commit in a different folder produces a different id |
 | `EnforceConfig` | `true` | The host's synced settings win while you are connected |
+
+## Shared source, which is not part of this plugin
+
+`shared\Prefabs.cs` lives in this repo and is excluded from this DLL. Mods link it:
+
+```xml
+<Compile Include="..\core\shared\Prefabs.cs" Link="shared\Prefabs.cs" />
+```
+
+It is the runtime prefab registry every mod that invents a piece, an item or a creature
+needs: `Prefabs.Keep(name, build, item, buildTool)` builds once and re-registers into every
+world from the mod's own update - both of ZNetScene's lookups, ObjectDB when it is an item, a
+tool's build menu when it is a piece - checking the live scene each time rather than a flag.
+The steps are available separately as `Known`, `Holder`, `Clone`, `Donor`, `Register`,
+`RegisterItem`, `ToolPieces`, `InTool` and `AddToTool`.
+
+**Why source and not a class in here.** Core is a soft dependency by design: a mod without it
+loses the version gate and the host's settings and otherwise works. Registration is not like
+that - a mod that could not register its prefab would load, patch nothing into the world and
+look broken - so putting it in this DLL would have made Core mandatory for five mods to do
+anything at all. A runtime fallback would have kept both properties and cost two code paths,
+the second of which only ever runs where nobody tests. One shared file is one code path.
+
+The failure it exists to prevent is worth stating plainly, because it is silent: ZNetScene
+and ObjectDB are rebuilt on every world load, including a trip to the menu and back, so a mod
+that answers "registered yet?" from a static bool says yes to a scene that has never heard of
+the prefab, registration early-returns, and every ZDO of that prefab is discarded as junk
+with nothing written to any log. A built piece was lost to it on 2026-08-16.
 
 ## Design notes
 

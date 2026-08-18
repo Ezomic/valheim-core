@@ -96,15 +96,14 @@ namespace Ezomic.Core
         }
 
         /// <summary>
-        /// Core owns the timing for anything shared, so no mod has to. All three are cheap
-        /// when nothing has changed: they compare against what they last wrote, or against
-        /// what the live scene says, and return.
+        /// Core owns the timing for anything shared, so no mod has to. Both of these are
+        /// cheap when nothing has changed - they compare against what they last wrote and
+        /// return.
         /// </summary>
         private void Update()
         {
             InventoryRows.Tick();
             InventoryRows.Backdrop.Tick();
-            Prefabs.Tick();
         }
 
         private void OnDestroy()

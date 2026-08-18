@@ -17,6 +17,14 @@
     <NoWarn>CS0649;CS0169</NoWarn>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- shared\ is source the mods link into their own projects, not part of this DLL. An
+         SDK project globs every .cs under it, so without this removal Prefabs.cs would be
+         compiled into EzomicCore.dll as well as into each mod that links it - and a mod
+         referencing this assembly would then see the type twice and fail to compile. -->
+    <Compile Remove="shared\**" />
+  </ItemGroup>
+
   <PropertyGroup>
     <ValheimDir Condition="'$(ValheimDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Valheim</ValheimDir>
     <ManagedDir>$(ValheimDir)\valheim_Data\Managed</ManagedDir>

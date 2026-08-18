@@ -21,18 +21,26 @@ and the mod uses [semantic versioning](https://semver.org).
   on its own, and they are not the only thing a player would resent losing - a UI scale, a
   colour, a hover-text toggle. Anything a mismatch cannot desync belongs to the player, and
   only the mod knows which of its settings those are.
-- **`Prefabs`, one runtime prefab registry for the suite.** Six mods had their own copy, and
-  the copies are not the point: the wrong version of this destroys saved objects in silence.
-  ZNetScene and ObjectDB are rebuilt on every world load, including a trip to the menu and
-  back, so a mod that answers "registered yet?" from a static bool says yes to a scene that
-  has never heard of the prefab, registration early-returns, and every ZDO of it is discarded
-  as junk with nothing written to any log. Stow lost a built piece that way on 2026-08-16.
-  Everything in `Prefabs` asks the live scene instead. `Prefabs.Keep` takes a name and a
-  builder and holds the thing registered - ZNetScene's two lookups, ObjectDB when it is an
-  item, a tool's build menu when it is a piece - for whatever world is loaded at the time.
-  The individual steps are public too, for mods that want to place them themselves.
-  Registering the mods against it is a separate change, one mod at a time; nothing calls it
-  yet.
+- **`shared\Prefabs.cs`: one runtime prefab registry for the suite, as shared source rather
+  than as part of this DLL.** Five mods have their own copy, and the copies are not the
+  point: the wrong version of this destroys saved objects in silence. ZNetScene and ObjectDB
+  are rebuilt on every world load, including a trip to the menu and back, so a mod answering
+  "registered yet?" from a static bool says yes to a scene that has never heard of the
+  prefab, registration early-returns, and every ZDO of it is discarded as junk with nothing
+  written to any log. Stow lost a built piece that way on 2026-08-16. Everything here asks
+  the live scene instead. `Prefabs.Keep` takes a name and a builder and holds the thing
+  registered for whatever world is loaded - both of ZNetScene's lookups, ObjectDB when it is
+  an item, a tool's build menu when it is a piece.
+
+  It is linked into each mod's csproj and excluded from this project, so **Core gains no new
+  responsibility and the mods gain no new dependency**. That is the whole reason it is a file
+  and not a class in here: Core is soft everywhere, and a mod that could not register its
+  prefab would load, patch nothing into the world and look broken - so owning this would have
+  made Core mandatory for five mods to do anything at all. A runtime fallback was considered
+  and rejected for costing two code paths, the second of which only ever runs where nobody
+  tests, which is how the bug above survived in the first place.
+
+  Nothing links it yet; that is a change per mod.
 
 ## [1.0.1] - 2026-08-18
 

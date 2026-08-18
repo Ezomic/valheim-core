@@ -1,16 +1,41 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
 
-namespace Ezomic.Core
+namespace Ezomic.Shared
 {
     /// <summary>
     /// Handing a runtime-built prefab to the game, done once instead of once per mod.
     ///
-    /// Six mods here had their own copy of this, and the copies are not the interesting part.
-    /// The interesting part is that getting it wrong destroys saved objects silently. The
+    /// <b>This file is shared source, not a library.</b> It lives in the core repo because
+    /// that is where shared things live, and it is <i>linked</i> into each mod's csproj
+    /// rather than compiled into EzomicCore.dll:
+    ///
+    /// <code>
+    /// &lt;Compile Include="..\core\shared\Prefabs.cs" Link="shared\Prefabs.cs" /&gt;
+    /// </code>
+    ///
+    /// Core is a soft dependency everywhere in this suite, and deliberately so: a mod without
+    /// Core loses the version gate and the host's settings and otherwise works. Registration
+    /// is not like that. A mod that could not register its prefab would load, patch nothing
+    /// into the world and look broken, so putting this in Core would have made Core
+    /// mandatory for five mods to do anything at all.
+    ///
+    /// The alternative considered and rejected was a runtime fallback - Core when present,
+    /// a local copy when not. That is two code paths where the second one only ever runs on
+    /// machines nobody tests on, which is precisely how the bug described below survived
+    /// long enough to destroy something. One shared file is one code path.
+    ///
+    /// What it costs: a fix here means rebuilding every mod that links it, and on Thunderstore
+    /// that is a release each rather than one release of Core. Locally it costs nothing,
+    /// because sync-all.ps1 rebuilds everything anyway and the version gate compares build
+    /// ids, so these travel together regardless.
+    ///
+    /// Five mods here have their own copy of this, and the copies are not the interesting
+    /// part. The interesting part is that getting it wrong destroys saved objects silently. The
     /// scene and the item database are torn down and rebuilt on every world load - including
     /// logging out to the menu and back in - and a mod that answers "have I registered yet?"
     /// from a static bool says yes to a scene that has never heard of the prefab.
@@ -34,6 +59,24 @@ namespace Ezomic.Core
     /// </summary>
     public static class Prefabs
     {
+        /// <summary>
+        /// Where this writes. Set it to the plugin's own logger in Awake, so a line about a
+        /// prefab is attributed to the mod that owns it rather than to a shared name that
+        /// says nothing about which of them is talking.
+        ///
+        /// Left unset it makes its own source, because a missing assignment must not be an
+        /// exception thrown from an update.
+        /// </summary>
+        public static ManualLogSource Log
+        {
+            // Fully qualified: UnityEngine has a Logger too, and this file is compiled with
+            // "using UnityEngine" in five projects that will never agree to drop it.
+            get { return _log ?? (_log = BepInEx.Logging.Logger.CreateLogSource("Prefabs")); }
+            set { _log = value; }
+        }
+
+        private static ManualLogSource _log;
+
         private static GameObject _holder;
 
         /// <summary>Standing registrations, in the order they were declared.</summary>
@@ -107,7 +150,7 @@ namespace Ezomic.Core
             }
 
             Standing.Add(new Kept { Name = name, Build = build, Item = item, Tool = buildTool });
-            CorePlugin.Log.LogInfo("Keeping " + name + " registered.");
+            Log.LogInfo("Keeping " + name + " registered.");
         }
 
         /// <summary>
@@ -123,11 +166,15 @@ namespace Ezomic.Core
         }
 
         /// <summary>
-        /// Driven from Core's Update. Every check inside is a lookup that returns immediately
-        /// once satisfied, so the steady-state cost is one dictionary read per kept prefab
-        /// per frame and nothing else.
+        /// Call this from the plugin's Update. Every check inside is a lookup that returns
+        /// immediately once satisfied, so the steady-state cost is one dictionary read per
+        /// kept prefab per frame and nothing else.
+        ///
+        /// There is no hook that could replace it. ZNetScene and ObjectDB do not exist at
+        /// load and are rebuilt per world, so there is no single moment to patch - only a
+        /// question worth asking cheaply and often.
         /// </summary>
-        internal static void Tick()
+        public static void Tick()
         {
             if (Standing.Count == 0) return;
 
@@ -163,7 +210,7 @@ namespace Ezomic.Core
             }
             catch (Exception e)
             {
-                CorePlugin.Log.LogWarning("Building " + kept.Name + " failed: " + e.Message);
+                Log.LogWarning("Building " + kept.Name + " failed: " + e.Message);
             }
 
             if (built != null)
@@ -181,7 +228,7 @@ namespace Ezomic.Core
             if (++kept.Failures < MaxFailures) return false;
 
             kept.Abandoned = true;
-            CorePlugin.Log.LogError(kept.Name + " could not be built after " + MaxFailures
+            Log.LogError(kept.Name + " could not be built after " + MaxFailures
                 + " attempts and will not be retried. Anything already built with it in a "
                 + "world is untouched; it simply will not be placeable this session.");
             return false;
@@ -212,7 +259,10 @@ namespace Ezomic.Core
             {
                 if (_holder == null)
                 {
-                    _holder = new GameObject("EzomicCorePrefabs");
+                    // Named after whoever is logging, because each mod linking this file
+                    // gets its own holder and a row of identically named objects in a scene
+                    // dump is not a thing anyone can read.
+                    _holder = new GameObject(Log.SourceName + "Prefabs");
                     _holder.SetActive(false);
                     UnityEngine.Object.DontDestroyOnLoad(_holder);
                 }
@@ -310,7 +360,7 @@ namespace Ezomic.Core
                 return false;
             }
 
-            CorePlugin.Log.LogInfo("Registered " + prefab.name + " with ZNetScene.");
+            Log.LogInfo("Registered " + prefab.name + " with ZNetScene.");
             return true;
         }
 
@@ -346,7 +396,7 @@ namespace Ezomic.Core
                 return false;
             }
 
-            CorePlugin.Log.LogInfo("Registered " + prefab.name + " with ObjectDB.");
+            Log.LogInfo("Registered " + prefab.name + " with ObjectDB.");
             return true;
         }
 
@@ -392,7 +442,7 @@ namespace Ezomic.Core
 
             // Logged on the add rather than on the call: this is retried every frame, and an
             // already-satisfied retry would write a line per frame.
-            CorePlugin.Log.LogInfo(prefab.name + " added to the " + toolPrefab + ".");
+            Log.LogInfo(prefab.name + " added to the " + toolPrefab + ".");
             return true;
         }
 
@@ -409,7 +459,7 @@ namespace Ezomic.Core
         {
             if (!Complained.Add(key)) return;
 
-            CorePlugin.Log.LogError(message);
+            Log.LogError(message);
         }
 
         // ------------------------------------------------------------------ reflection
