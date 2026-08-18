@@ -26,14 +26,14 @@ namespace Ezomic.Core
     // server in the family was unguarded, and RPC_PeerInfo's IsServer branch - the only
     // branch that can actually refuse a connection - was unreachable.
     //
-    // It also broke Delve, which declares Core a hard dependency and has no BepInProcess of
-    // its own: on a dedicated server the dependency was simply absent and Delve refused to
-    // load at all.
+    // It also breaks any mod that declares Core a hard dependency and carries no
+    // BepInProcess of its own: on a dedicated server the dependency is simply absent, so
+    // BepInEx refuses to load that mod at all. That is how this was found.
     public class CorePlugin : BaseUnityPlugin
     {
         public const string PluginGuid = "ezomic.valheim.core";
         public const string PluginName = "Core";
-        public const string PluginVersion = "0.3.0";
+        public const string PluginVersion = "1.0.0";
         public const string PluginAuthor = "Robbin Thijssen";
 
         internal static ManualLogSource Log;

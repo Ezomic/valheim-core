@@ -5,11 +5,11 @@
     <AssemblyName>EzomicCore</AssemblyName>
     <RootNamespace>Ezomic.Core</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Version>0.3.0</Version>
+    <Version>1.0.0</Version>
     <Authors>Robbin Thijssen</Authors>
     <Company>Thijssen Software</Company>
     <Product>Core</Product>
-    <Description>Shared plumbing for the Ezomic mods: version gating, host-authoritative config, and the deed registry.</Description>
+    <Description>Shared plumbing for the Ezomic mods: version gating, host-authoritative config, and the shared inventory height.</Description>
     <Copyright>Copyright (c) 2026 Robbin Thijssen</Copyright>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -30,9 +30,6 @@
     <!-- ZPackage.Write has Vector2i/Vector2s overloads, so every Write needs this even
          though nothing here writes a vector. -->
     <Reference Include="assembly_utils"><HintPath>$(ManagedDir)\assembly_utils.dll</HintPath><Private>false</Private></Reference>
-    <!-- SoftRefAssets wraps this assembly's IAssetLoader so runtime prefabs can be
-         soft-referenced. Nothing else in Core touches it. -->
-    <Reference Include="SoftReferenceableAssets"><HintPath>$(ManagedDir)\SoftReferenceableAssets.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine"><HintPath>$(ManagedDir)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
     <!-- The inventory backdrop is Unity UI: that window is Images inside a Canvas. -->

@@ -3,6 +3,26 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
+## [1.0.0] - 2026-08-18
+
+Core is what the suite actually needs from it and nothing else.
+
+### Removed
+
+- **The deed registry and the soft-reference asset loader are gone.** Both were written for
+  mods that are not in this release, and shipping the plumbing for something nobody can
+  install is how a shared library turns into a junk drawer. They live on the
+  `deeds-and-softref` branch and come back with the mods that use them, not before.
+- The `SoftReferenceableAssets` reference goes with them, so Core now builds against
+  assembly_valheim, assembly_utils, four Unity assemblies, BepInEx and Harmony.
+
+### Changed
+
+- The README describes all three of the things this does. It described two, and the
+  inventory height had never been written down anywhere a person would look.
+- `EnforceBuilds` is in the config table. It has been in the config file since 0.2.0 and
+  missing from the documentation for exactly as long.
+
 ## [0.2.0] - 2026-08-16
 
 First published release. Earlier numbers were development only and never went out.
