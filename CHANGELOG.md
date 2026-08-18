@@ -3,6 +3,19 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
+## [1.0.1] - 2026-08-18
+
+Documentation only. No code changed, and the DLL differs from 1.0.0 only in the version it
+reports.
+
+### Added
+
+- **The readme says where to report a bug.** It did not, in any mod here, so anyone who
+  installed this from Thunderstore had the comment section and nothing else - which is not a
+  route for anything that needs a log file attached. Discord first, because the common case
+  is a player who cannot tell whether what they are seeing is a bug, a config value or
+  vanilla, and that is a conversation rather than an issue.
+
 ## [1.0.0] - 2026-08-18
 
 Core is what the suite actually needs from it and nothing else.

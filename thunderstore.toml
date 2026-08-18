@@ -7,7 +7,7 @@ schemaVersion = "0.0.1"
 [package]
 namespace = "Ezomic"
 name = "Longhouse_Core"
-versionNumber = "1.0.0"
+versionNumber = "1.0.1"
 description = "Shared plumbing for the Ezomic mods. Installed for you as a dependency."
 websiteUrl = "https://github.com/Ezomic/valheim-core"
 containsNsfwContent = false
