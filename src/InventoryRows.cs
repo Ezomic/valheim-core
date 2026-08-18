@@ -174,13 +174,24 @@ namespace Ezomic.Core
             // condition the player had no way of knowing about. Seen in a real session as
             // four vanilla rows plus one claimed row displaying as nine, cleared only by
             // emptying the pack and relogging.
-            // Only reached when the claim total changed or a load just happened, because of
-            // the early return above. That is the case that matters - the observed failure
-            // was a grid arriving from disk already held open - but it does mean emptying a
-            // stranded row mid-session does not shrink the grid until something else moves.
-            // Re-measuring every frame to catch that would walk the item list every frame
-            // for a state that resolves itself on the next login.
-            var rescued = Occupied(inventory) > honest ? Compact(inventory, honest) : 0;
+            // Not while nothing has claimed yet, and this is the whole reason that guard is
+            // worth its lines. A load forces one tick through here before any mod's Update
+            // has run, so Claims is momentarily empty and `honest` is the bare vanilla
+            // height. Writing that height was harmless - the next tick corrected it. Moving
+            // items to fit it is not: it packs the player's things out of rows that are
+            // about to be claimed back, and it would do it on every single login. Observed
+            // exactly once, as "4 + 0 claimed by 0 mod(s), 6 item(s) moved up" one frame
+            // before "4 + 1 claimed by 1 mod(s)".
+            //
+            // Otherwise only reached when the claim total changed, because of the early
+            // return above. That still covers the case this exists for - a grid arriving
+            // from disk already held open - since the first real claim lands a frame later.
+            // It does mean emptying a stranded row mid-session waits for the next login to
+            // shrink the grid; re-measuring every frame would walk the item list every frame
+            // for a state that resolves itself anyway.
+            var rescued = Claims.Count > 0 && Occupied(inventory) > honest
+                ? Compact(inventory, honest)
+                : 0;
 
             // Never below what is actually in the grid. Releasing rows is a real operation -
             // strip your armour and a mod that claimed rows for it gives them back - and the
