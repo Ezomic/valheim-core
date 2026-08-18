@@ -8,7 +8,8 @@ Single DLL, no assets.
 
 ## What it does
 
-Three things. Two are about multiplayer, and one is about two mods wanting the same field.
+Four things. Two are about multiplayer, and two are about several mods wanting the same
+thing and having to agree.
 
 **It refuses a connection that would break.** If the server has Yoke 1.2.0 and you have
 1.1.0, you are turned away at the door instead of playing for an hour into stacks that only
@@ -23,7 +24,12 @@ your numbers, and they get their own back the moment they disconnect.
 write the same private int, so instead they each state a number and Core adds them up and
 writes once.
 
-All three are off-switchable. None of them is on by accident.
+**It hands runtime-built prefabs to the game.** Every mod here that invents a piece, an item
+or a creature needs the same registration, and the version of it that looks correct silently
+destroys saved objects on the second world of a session. Written once, where it can be got
+right once.
+
+The two multiplayer ones are off-switchable. Neither is on by accident.
 
 ## Why it exists
 
@@ -74,11 +80,29 @@ stranger ways than nobody having it.
 
 ### What to sync, and what not to
 
-Sync anything a mismatch would desync: item data, stack sizes, a range that decides whether
-two clients agree a chest is in reach.
+Registering a mod syncs its whole config file. That is the default because the opt-in version
+had two entries opting in across thirteen mods, and a setting that changes the world has to
+match on both ends or the two disagree silently.
 
-Leave keybinds, messages and anything cosmetic alone. Forcing a host's keybinds onto a guest
-is the kind of sync that gets a mod uninstalled.
+Two things come out of it. **Keybinds are never synced**, because nothing about which key
+opens a window can desync a world and taking someone's keys away for the evening is the kind
+of sync that gets a mod uninstalled. Core knows a keybind by its type, which is the only
+honest signal it has about a mod it knows nothing about.
+
+Everything else a player would resent losing is the mod's own call:
+
+```csharp
+Suite.Local(TetherConfig.HoverText, TetherConfig.UiScale);
+```
+
+A UI scale, a colour, a hover-text toggle, a preferred unit. If a mismatch cannot desync
+anything, it belongs here.
+
+The reverse also exists, for the strange case where a key really does have to match:
+
+```csharp
+Suite.Sync(StowConfig.KeyStow);   // overrides the keybind exception
+```
 
 ### Data files
 
@@ -91,6 +115,32 @@ can run the same build and disagree about what is in that file, and the gate wou
 `Data` folds the contents into the same comparison. A mod that never calls it is compared as
 unknown rather than as a mismatch, so an older Core on the far end costs the check and
 nothing else.
+
+### Runtime prefabs
+
+```csharp
+Prefabs.Keep(StowPost.Name, StowPost.Build, buildTool: "Hammer");
+```
+
+Core builds it once, and re-registers it into every world for as long as the game is running:
+ZNetScene's two lookups, ObjectDB when it is an item, and a tool's build menu when it is a
+piece.
+
+The reason this is Core's rather than a copy per mod is not the copies. It is that the wrong
+version of it destroys saved objects and says nothing. The scene and the item database are
+rebuilt on every world load, including logging out to the menu and back in, so a mod that
+answers "have I registered yet?" from a static bool says yes to a scene that has never heard
+of the prefab. Registration early-returns, ZNetScene cannot resolve the saved hash, and it
+discards every ZDO of that prefab as junk. No exception, no log line, and a built piece is
+gone. Everything here asks the live scene instead, which costs a dictionary read and cannot
+go stale.
+
+The prefab name is permanent, for the same reason: it *is* the hash the ZDOs are stored
+against. Renaming one destroys everything already standing in a world.
+
+The rest of it is available on its own for mods that want to place the pieces themselves -
+`Known`, `Holder`, `Clone`, `Donor`, `Register`, `RegisterItem`, `ToolPieces`, `InTool`,
+`AddToTool`.
 
 ### Extra inventory rows
 

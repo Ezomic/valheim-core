@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using BepInEx.Configuration;
+using UnityEngine;
 
 namespace Ezomic.Core
 {
@@ -72,7 +73,7 @@ namespace Ezomic.Core
             entry.Config = config;
             entry.Fingerprint = FingerprintOf(owner ?? Assembly.GetCallingAssembly());
 
-            // Everything, not an opt-in list.
+            // Everything except what is personal, not an opt-in list.
             //
             // It was opt-in and almost nothing opted in: two entries across thirteen mods. A
             // setting that changes what happens in the world has to match on both ends or the
@@ -81,8 +82,14 @@ namespace Ezomic.Core
             // granted, for an evening, with both logs looking reasonable.
             //
             // Forcing all of it is safe because of how it is applied: values are swapped in
-            // memory, never written to the player's file, and put back on disconnect. A host
-            // deciding your keybind lasts exactly as long as you are on that host.
+            // memory, never written to the player's file, and put back on disconnect.
+            //
+            // Except for one class of setting where "lasts only as long as you are on that
+            // host" is no comfort at all, and this readme said so before the code did: a
+            // keybind. Nothing about which key opens a window can desync a world, and taking
+            // someone's keys away for the evening is the kind of sync that gets a mod
+            // uninstalled. Three mods here bind one - Tether, Vaettir's stow and Devkit - so
+            // this was not hypothetical. See IsPersonal.
             AbsorbConfig(entry);
 
             _lastRegistered = guid;
@@ -194,25 +201,95 @@ namespace Ezomic.Core
         }
 
         /// <summary>
-        /// Marks an entry as synced. A formality now: registering a mod syncs its whole
-        /// config, so everything is already covered. Kept because mods call it, and because
-        /// naming an entry here is a way of saying out loud that it is the host's.
+        /// Marks an entry as synced. Nearly a formality: registering a mod syncs its whole
+        /// config, so everything is already covered except the personal settings
+        /// <see cref="IsPersonal"/> holds back. Naming one here overrides that - it is the
+        /// way to say a keybind really does have to match, which is a strange thing to want
+        /// and is therefore worth having to write down.
         /// </summary>
         public static void Sync(ConfigEntryBase entry)
         {
             if (entry == null) throw new ArgumentNullException(nameof(entry));
 
-            if (_lastRegistered == null || !Mods.ContainsKey(_lastRegistered))
-                throw new InvalidOperationException(
-                    "Suite.Sync was called before Suite.Register. Register the mod first.");
+            ModEntry mod = Current();
+            string key = Key(entry);
 
-            Mods[_lastRegistered].Synced[Key(entry)] = entry;
+            mod.Forced.Add(key);
+            mod.Local.Remove(key);
+            mod.Synced[key] = entry;
         }
 
         /// <summary>Syncs several at once, for the common case of a whole section.</summary>
         public static void Sync(params ConfigEntryBase[] entries)
         {
             foreach (ConfigEntryBase entry in entries) Sync(entry);
+        }
+
+        /// <summary>
+        /// Keep an entry out of the host's hands. The player's own value stands whatever
+        /// server they are on.
+        ///
+        /// The opposite of <see cref="Sync"/>, and needed for the same reason the default
+        /// flipped to syncing everything: the choice is now which settings are *not* the
+        /// host's, and only the mod knows. Use it for anything a mismatch cannot desync and a
+        /// player would resent losing - a keybind is handled without asking, but a UI scale,
+        /// a colour, a hover-text toggle or a preferred unit all belong here too.
+        ///
+        /// Safe to call before or after the entry exists in the file, and safe to call twice.
+        /// </summary>
+        public static void Local(ConfigEntryBase entry)
+        {
+            if (entry == null) throw new ArgumentNullException(nameof(entry));
+
+            ModEntry mod = Current();
+            string key = Key(entry);
+
+            mod.Local.Add(key);
+            mod.Forced.Remove(key);
+
+            // Removed rather than merely blocked from being absorbed again: Register absorbs
+            // the whole file, so by the time a mod calls this the entry is usually already in
+            // there, and leaving it would sync it anyway.
+            mod.Synced.Remove(key);
+        }
+
+        /// <summary>Keeps several out at once.</summary>
+        public static void Local(params ConfigEntryBase[] entries)
+        {
+            foreach (ConfigEntryBase entry in entries) Local(entry);
+        }
+
+        /// <summary>The mod that registered last, which is whose Awake we are inside.</summary>
+        private static ModEntry Current()
+        {
+            ModEntry mod;
+            if (_lastRegistered == null || !Mods.TryGetValue(_lastRegistered, out mod))
+                throw new InvalidOperationException(
+                    "Suite.Sync and Suite.Local run against the mod that registered last. "
+                    + "Call Suite.Register first.");
+
+            return mod;
+        }
+
+        /// <summary>
+        /// Settings a host has no business deciding, held back from the sync-everything
+        /// default unless the mod insists with <see cref="Sync"/>.
+        ///
+        /// Only keybinds, and deliberately only keybinds. The test has to be something Core
+        /// can apply to a mod it knows nothing about, and the setting's own type is the one
+        /// honest signal available: a KeyboardShortcut is a key and nothing else. Guessing
+        /// from section or key names - anything called "Colour", anything under "UI" - would
+        /// be Core deciding what a mod's settings mean from their spelling, and it would be
+        /// wrong quietly. Everything past keybinds is the mod's call, through Suite.Local.
+        ///
+        /// The failure this prevents: a player joins a server and finds their menu key is now
+        /// whatever the host's is, with no message saying so and no way to change it back
+        /// while connected, because the entry is also greyed out and put back on edit.
+        /// </summary>
+        private static bool IsPersonal(ConfigEntryBase entry)
+        {
+            Type type = entry.SettingType;
+            return type == typeof(KeyboardShortcut) || type == typeof(KeyCode);
         }
 
         /// <summary>
@@ -236,7 +313,12 @@ namespace Ezomic.Core
                 ConfigEntryBase bound = entry.Config[definition];
                 if (bound == null) continue;
 
-                entry.Synced[definition.Section + "." + definition.Key] = bound;
+                string key = definition.Section + "." + definition.Key;
+
+                if (entry.Local.Contains(key)) continue;
+                if (IsPersonal(bound) && !entry.Forced.Contains(key)) continue;
+
+                entry.Synced[key] = bound;
             }
         }
 

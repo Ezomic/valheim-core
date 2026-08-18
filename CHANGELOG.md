@@ -3,6 +3,37 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- **A host no longer takes your keybinds.** Registering a mod syncs its whole config file,
+  which is right for anything a mismatch could desync and wrong for the one class of setting
+  the readme had already warned against in as many words. Three mods here bind a key -
+  Tether, Vaettir's stow and Devkit - so for as long as this stood, joining a server moved
+  your keys to whatever the host had chosen, greyed the entry out, and put the value back if
+  you tried to change it. Keybinds are now held back by type. A mod that genuinely needs one
+  to match can still say so with `Suite.Sync`.
+
+### Added
+
+- **`Suite.Local`**, the other half of that. Keybinds are the only thing Core can recognise
+  on its own, and they are not the only thing a player would resent losing - a UI scale, a
+  colour, a hover-text toggle. Anything a mismatch cannot desync belongs to the player, and
+  only the mod knows which of its settings those are.
+- **`Prefabs`, one runtime prefab registry for the suite.** Six mods had their own copy, and
+  the copies are not the point: the wrong version of this destroys saved objects in silence.
+  ZNetScene and ObjectDB are rebuilt on every world load, including a trip to the menu and
+  back, so a mod that answers "registered yet?" from a static bool says yes to a scene that
+  has never heard of the prefab, registration early-returns, and every ZDO of it is discarded
+  as junk with nothing written to any log. Stow lost a built piece that way on 2026-08-16.
+  Everything in `Prefabs` asks the live scene instead. `Prefabs.Keep` takes a name and a
+  builder and holds the thing registered - ZNetScene's two lookups, ObjectDB when it is an
+  item, a tool's build menu when it is a piece - for whatever world is loaded at the time.
+  The individual steps are public too, for mods that want to place them themselves.
+  Registering the mods against it is a separate change, one mod at a time; nothing calls it
+  yet.
+
 ## [1.0.1] - 2026-08-18
 
 Documentation only. No code changed, and the DLL differs from 1.0.0 only in the version it

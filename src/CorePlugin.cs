@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using BepInEx;
 using BepInEx.Configuration;
@@ -95,14 +96,15 @@ namespace Ezomic.Core
         }
 
         /// <summary>
-        /// Core owns the timing for anything shared, so no mod has to. Both of these are
-        /// cheap when nothing has changed - they compare against what they last wrote and
-        /// return.
+        /// Core owns the timing for anything shared, so no mod has to. All three are cheap
+        /// when nothing has changed: they compare against what they last wrote, or against
+        /// what the live scene says, and return.
         /// </summary>
         private void Update()
         {
             InventoryRows.Tick();
             InventoryRows.Backdrop.Tick();
+            Prefabs.Tick();
         }
 
         private void OnDestroy()
@@ -153,11 +155,24 @@ namespace Ezomic.Core
 
         /// <summary>Entries the host dictates, keyed by "section.key" as sent on the wire.</summary>
         /// <summary>
-        /// Every entry of this mod's config, filled in at registration. All of it is the
-        /// host's to decide - see Suite.Register.
+        /// The entries of this mod's config the host decides, filled in at registration.
+        /// All of them bar keybinds and whatever the mod held back with Suite.Local - see
+        /// Suite.Register.
         /// </summary>
         internal readonly Dictionary<string, ConfigEntryBase> Synced =
             new Dictionary<string, ConfigEntryBase>();
 
+        /// <summary>
+        /// Entries the mod declared as the player's own, through Suite.Local. Kept as keys
+        /// rather than entries because a mod may declare one before it is bound, and because
+        /// this has to survive the mod re-registering.
+        /// </summary>
+        internal readonly HashSet<string> Local = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Entries the mod insisted on syncing through Suite.Sync, which is what overrides
+        /// the personal-setting exception. Empty for every mod that has no reason to.
+        /// </summary>
+        internal readonly HashSet<string> Forced = new HashSet<string>(StringComparer.Ordinal);
     }
 }
