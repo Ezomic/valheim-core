@@ -91,6 +91,7 @@ namespace Ezomic.Core
             // never needed registering. It does now: its Player.Load prefix is what stops
             // a character load destroying every item sitting in a claimed row.
             _harmony.PatchAll(typeof(InventoryRows));
+            _harmony.PatchAll(typeof(InventoryLoad));
 
             Log.LogInfo(PluginName + " " + PluginVersion + " by " + PluginAuthor + " - ready.");
         }
