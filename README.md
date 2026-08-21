@@ -8,7 +8,8 @@ Single DLL, no assets.
 
 ## What it does
 
-Three things. Two are about multiplayer, and one is about two mods wanting the same field.
+Four things. Two are about multiplayer, one is about two mods wanting the same field, and
+one is about a crash.
 
 **It refuses a connection that would break.** If the server has Yoke 1.2.0 and you have
 1.1.0, you are turned away at the door instead of playing for an hour into stacks that only
@@ -23,7 +24,17 @@ your numbers, and they get their own back the moment they disconnect.
 write the same private int, so instead they each state a number and Core adds them up and
 writes once.
 
-All three are off-switchable. None of them is on by accident.
+**It saves your character after your inventory changes.** Vanilla writes your character file
+every thirty minutes, when you quit cleanly, and when you sleep. A crash between two of those
+throws away everything since the last one, and on a server that is worse than a rollback: the
+world saved on its own schedule, so iron you pulled out of a chest before the crash is gone
+from the chest *and* gone from you. Core marks you dirty when your items change and writes at
+most once every thirty seconds, so a trip to the base is two saves rather than one per chest.
+It adds to the thirty-minute save rather than replacing it - the map is still written on the
+vanilla schedule, because recompressing it is the expensive part and fog is not the thing
+anyone minds losing.
+
+All four are off-switchable. None of them is on by accident.
 
 This repo also carries `shared\Prefabs.cs`, which is **not** in the DLL - see below.
 
