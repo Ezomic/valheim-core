@@ -3,7 +3,15 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
-## [Unreleased]
+## [1.1.0] - 2026-08-23
+
+Two changes, both about who owns what. Neither touches a prefab name or a saved value, so
+nothing already in a world is at stake.
+
+**Not in this release: the save-on-inventory-change guard.** It is written and it works, and
+it is held back on the `saveguard` branch rather than shipped, because it changes when every
+player's character is written to disk and this release is not the one to find that out in.
+
 
 ### Fixed
 
