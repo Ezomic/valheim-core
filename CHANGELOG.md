@@ -17,22 +17,6 @@ and the mod uses [semantic versioning](https://semver.org).
 
 ### Added
 
-- **A crash no longer costs you half an hour of inventory.** `Game.m_saveInterval` is 1800
-  seconds, and outside it your character is written only by a clean quit and by sleeping.
-  Everything between the last of those and a crash is thrown away. On a dedicated server only
-  one of the two machines rolls back, so the failure is not "you lose progress" - it is that
-  loot taken out of a chest before the crash exists nowhere afterwards, and loot put *into*
-  one exists twice. Core now watches `Inventory.Changed` on the local player, which is the
-  game's own answer to "these are not the items you had", and reaches every route into it:
-  chests, crafting, pickups, drops, quick-stack, eating. It marks the character dirty rather
-  than saving, because dumping a haul into a wall of chests fires that once per chest and
-  twenty writes in twenty seconds is twenty Steam cloud round trips for one trip home. At
-  most one save per `SaveGapSeconds` (30 by default), and the flag stays set until a save
-  actually happens, so the last change always lands. Only `SavePlayerData` and
-  `profile.Save()` are called, not `Game.SavePlayerProfile` - the third thing that does is
-  `Minimap.SaveMapData`, which recompressed 8.4MB down to 9.3KB in this machine's own log and
-  is most of the cost of a save. `m_saveTimer` is deliberately not reset, so vanilla's
-  thirty-minute save still runs and still writes the map.
 - **`Suite.Local`**, the other half of that. Keybinds are the only thing Core can recognise
   on its own, and they are not the only thing a player would resent losing - a UI scale, a
   colour, a hover-text toggle. Anything a mismatch cannot desync belongs to the player, and

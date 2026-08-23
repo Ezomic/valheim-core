@@ -48,14 +48,6 @@ namespace Ezomic.Core
         internal static ConfigEntry<bool> EnforceBuilds;
         internal static ConfigEntry<bool> EnforceConfig;
 
-        /// <summary>
-        /// The crash net. See <see cref="SaveGuard"/> for why it is here rather than in a mod
-        /// of its own: it registers nothing, shows nothing, and every player in the pack
-        /// already has this DLL.
-        /// </summary>
-        internal static ConfigEntry<bool> SaveAfterChanges;
-        internal static ConfigEntry<float> SaveGap;
-
         private Harmony _harmony;
 
         private void Awake()
@@ -83,38 +75,12 @@ namespace Ezomic.Core
                 "The host's settings win. Clients keep their own file untouched and get it "
                 + "back the moment they disconnect - nothing is overwritten on disk.");
 
-            SaveAfterChanges = Config.Bind("Character", "SaveAfterChanges", true,
-                "Write your character file shortly after your inventory changes, instead of "
-                + "only on the game's own thirty-minute timer.\n"
-                + "Vanilla saves your character every 1800 seconds, when you quit cleanly, "
-                + "and when you sleep. A crash between two of those throws away everything "
-                + "since the last one. On a server it is worse than a rollback: the world "
-                + "saved on its own schedule, so loot you took out of a chest before the "
-                + "crash is gone from the chest and gone from you.\n"
-                + "This does not replace the thirty-minute save, it adds to it - the map is "
-                + "still written on the vanilla schedule, because recompressing it is the "
-                + "expensive part of a save and fog is not worth paying for every minute.");
-
-            SaveGap = Config.Bind("Character", "SaveGapSeconds", 30f,
-                "The shortest time between two of those saves, in seconds.\n"
-                + "This is what stops a trip to the base becoming one save per chest. "
-                + "Emptying your pack into a wall of chests changes your inventory twenty "
-                + "times in under a minute; at 30 that is two writes and you still lose at "
-                + "most half a minute. Lower it to trade more writes for a smaller window - "
-                + "each save is a file write and, on a cloud save, a Steam round trip.");
-
             // Core puts itself on its own gate. It was not on it before, which left the one
             // mod every other mod depends on as the only one whose mismatch went unreported -
             // and a Core mismatch is worse than any of theirs, because it is the handshake
             // itself that differs.
             Suite.Register(PluginGuid, PluginName, PluginVersion, Config, Requirement.Everyone,
                 typeof(CorePlugin).Assembly);
-
-            // Personal, and client-side in full: it decides when this machine writes its own
-            // character file, which is nobody else's business and cannot desync anything.
-            // Left synced it would be a host silently deciding how much of a guest's evening
-            // a crash is allowed to eat.
-            Suite.Local(SaveAfterChanges, SaveGap);
 
             _harmony = new Harmony(PluginGuid);
             _harmony.PatchAll(typeof(NetworkPatches));
@@ -126,7 +92,6 @@ namespace Ezomic.Core
             // a character load destroying every item sitting in a claimed row.
             _harmony.PatchAll(typeof(InventoryRows));
             _harmony.PatchAll(typeof(InventoryLoad));
-            _harmony.PatchAll(typeof(SaveGuard));
 
             Log.LogInfo(PluginName + " " + PluginVersion + " by " + PluginAuthor + " - ready.");
         }
@@ -140,7 +105,6 @@ namespace Ezomic.Core
         {
             InventoryRows.Tick();
             InventoryRows.Backdrop.Tick();
-            SaveGuard.Tick();
         }
 
         private void OnDestroy()
