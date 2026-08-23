@@ -1,7 +1,7 @@
 {
   "name": "Longhouse_Core",
   "author": "Robbin Thijssen",
-  "version_number": "1.0.1",
+  "version_number": "1.0.2",
   "website_url": "https://github.com/Ezomic/valheim-core",
   "description": "Shared plumbing for the Ezomic mods. Installed for you as a dependency.",
   "dependencies": [

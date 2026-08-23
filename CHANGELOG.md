@@ -3,6 +3,54 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
+## [1.0.2] - 2026-08-19
+
+**Dying no longer eats what was on the extra rows.** One fix, and nothing else is in this
+release: it is 1.0.1 with a single patch class added, so that the mod every player is
+required to have moves as little as possible.
+
+### Fixed
+
+- **A grave loses the rows it was buried with.** `InventoryRows` already widened the player's
+  grid before `Player.Load`, which fixed relogging and left the worse half of the same bug
+  standing - the items it ate were the ones you died holding.
+
+  Vanilla's own path, in order. `Player.CreateTombStone` copies the player's width and height
+  onto the grave, so the grave is born the right size and **nothing is lost yet** - which is
+  exactly why looting your own grave straight away looks fine. But a grave is a Container, so
+  its inventory round-trips through the ZDO, and `Inventory.Save` writes a version, a count
+  and the items and **not the height**. The grid is rebuilt from the tombstone prefab's own
+  height, which is vanilla's. Then `Inventory.Load` re-adds each item at its saved position
+  through a private `AddItem` that ends:
+
+      AddItem(component.m_itemData, component.m_itemData.m_stack, pos.x, pos.y);
+      UnityEngine.Object.Destroy(gameObject);
+      return true;
+
+  The positional `AddItem` starts with a bounds check and returns false when `y >= m_height`
+  - and **that result is thrown away**. The item is instantiated, refused, never added, and
+  destroyed, and the method returns true regardless. Then the grave saves again without it.
+
+  So the loss is silent *and* delayed. Loot the grave before its zone unloads and everything
+  is there; relog or walk away first and the bottom row is gone. That is what made it read as
+  random rather than as a rule.
+
+  The fix is the shape the player one already had: open the grid up for the duration of the
+  load, let the items land where they were, then let the contents decide the height. It is
+  applied to every inventory rather than only to graves, because the defect is not specific
+  to graves - any container read into a grid shorter than the one that wrote it deletes the
+  difference, and no caller can be told apart at this level. Widening can only ever keep an
+  item that would otherwise have been destroyed; being wrong here costs a container that
+  draws one row too many until it is emptied.
+
+### Not in this release
+
+Core's main branch also carries the keybind change, the move of `Prefabs.cs` out of this DLL
+into shared source, and a save-on-inventory-change guard. **None of them are here.** This
+release was cut from the 1.0.1 commit with the grave fix alone applied on top, because Core
+is the one mod every player must have at the same build, and a version gate is not the place
+to ship four things when one was asked for.
+
 ## [1.0.1] - 2026-08-18
 
 Documentation only. No code changed, and the DLL differs from 1.0.0 only in the version it
