@@ -85,6 +85,27 @@ namespace Ezomic.Core
         /// It also stands in for the first-sight branch in Tick: setting _player here is what
         /// stops that branch measuring the height and overwriting this.
         /// </summary>
+        /// <summary>
+        /// Said when vanilla's own row count leaves no room for everything claimed.
+        ///
+        /// Once per distinct shortfall, because SetInventorySize runs on every spawn and this
+        /// would otherwise be one line per login forever. It is a warning rather than info: a mod
+        /// asked for rows and did not get them, so anything reasoning about the total is now
+        /// wrong, and the player is one trader purchase away from losing the rest.
+        /// </summary>
+        private static readonly HashSet<string> _truncated = new HashSet<string>();
+
+        internal static void SayTruncated(int vanillaRows, int claimed, int granted)
+        {
+            var key = vanillaRows + ":" + claimed + ":" + granted;
+            if (!_truncated.Add(key)) return;
+
+            CorePlugin.Log.LogWarning("Inventory rows: vanilla is already at " + vanillaRows
+                + " and it caps the grid at " + VanillaRows.Ceiling + ", so of " + claimed
+                + " row(s) claimed only " + granted + " fit. The rows you bought are kept and "
+                + "nothing is dropped - the mod's rows are what give way.");
+        }
+
         internal static void LearnBase(int vanillaRows)
         {
             var player = Player.m_localPlayer;

@@ -131,7 +131,7 @@ namespace Ezomic.Core
             if (!Original.ContainsKey(entry)) Original[entry] = entry.BoxedValue;
 
             Imposed[entry] = value;
-            entry.BoxedValue = value;
+            SetQuietly(mod.Config, entry, value);
             SetReadOnly(entry, true);
 
             Watch(mod.Config);
@@ -157,7 +157,11 @@ namespace Ezomic.Core
                 _applying = true;
                 try
                 {
-                    args.ChangedSetting.BoxedValue = imposed;
+                    // Through SetQuietly like the other two write paths. This one fires whenever
+                    // anything writes an imposed entry - the in-game config window, a hot reload,
+                    // another mod - so left alone it would rewrite the player's file on every
+                    // stray edit, which is the busiest of the three routes to the same bug.
+                    SetQuietly(config, args.ChangedSetting, imposed);
                 }
                 finally
                 {
@@ -172,6 +176,34 @@ namespace Ezomic.Core
         /// </summary>
         [HarmonyPostfix]
         [HarmonyPatch(typeof(ZNet), "Shutdown")]
+        /// <summary>
+        /// Swap a value without BepInEx writing the file.
+        ///
+        /// ConfigEntry.BoxedValue's setter calls ConfigFile.Save when SaveOnConfigSet is true,
+        /// which it is by default - so every imposed value was being written straight into the
+        /// player's own .cfg on disk. This file's own summary says "Nothing is written to the
+        /// client's config file" and the log line says "Your own config file is untouched", and
+        /// both were false. The consequence is not cosmetic: a client that crashes or is killed
+        /// while connected never runs the restore, so the host's values are stranded in that
+        /// player's config and silently govern their next singleplayer evening.
+        ///
+        /// The flag is restored rather than left off, because it is the mod's own setting and
+        /// Core is borrowing it for one assignment.
+        /// </summary>
+        private static void SetQuietly(ConfigFile file, ConfigEntryBase entry, object value)
+        {
+            if (file == null)
+            {
+                entry.BoxedValue = value;
+                return;
+            }
+
+            var prior = file.SaveOnConfigSet;
+            file.SaveOnConfigSet = false;
+            try { entry.BoxedValue = value; }
+            finally { file.SaveOnConfigSet = prior; }
+        }
+
         private static void RestoreOnShutdown()
         {
             if (Original.Count == 0) return;
@@ -181,7 +213,7 @@ namespace Ezomic.Core
             {
                 foreach (KeyValuePair<ConfigEntryBase, object> pair in Original)
                 {
-                    pair.Key.BoxedValue = pair.Value;
+                    SetQuietly(pair.Key.ConfigFile, pair.Key, pair.Value);
                     SetReadOnly(pair.Key, false);
                 }
             }

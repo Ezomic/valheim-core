@@ -53,6 +53,18 @@ namespace Ezomic.Core
         /// not nested, and both halves of the mechanism have to agree on the spelling.
         /// </summary>
         internal const string RowsKey = "invrows";
+
+        /// <summary>
+        /// The tallest grid vanilla will accept - Player.SetInventorySize does
+        /// Mathf.Clamp(rows, 0, 9) and there is no way round it from a prefix.
+        ///
+        /// Read from the game rather than written down where that is possible, but this one is a
+        /// literal inside a Mathf.Clamp call with no field or property behind it, so it has to be
+        /// copied. If a future version moves it, the symptom is Core granting fewer rows than it
+        /// could - never more, and never an eviction - because the fence in VanillaRowsDrop
+        /// catches the other direction.
+        /// </summary>
+        internal const int Ceiling = 9;
     }
 
     /// <summary>Where vanilla decides how tall the grid is, and then enforces it.</summary>
@@ -84,7 +96,32 @@ namespace Ezomic.Core
                 if (!ReferenceEquals(__instance, Player.m_localPlayer)) return;
 
                 InventoryRows.LearnBase(rows);
-                rows = rows + InventoryRows.Total;
+
+                // Clamped here rather than left to vanilla, and Core is the one that yields.
+                //
+                // SetInventorySize does Mathf.Clamp(rows, 0, 9) immediately after this returns and
+                // then calls DropInvalidItems, so handing it a bigger number does not buy a taller
+                // grid - it buys an eviction. That is reachable without any mod misbehaving:
+                // Valheim 1.0 sells inventory rows through a trader (StoreGui checks
+                // m_incrementKey == "invrows" and calls SetInventorySize), and the console sets
+                // them too. A player who has bought four rows arrives here with a base of eight,
+                // and eight plus two claimed is ten.
+                //
+                // So the claim gives way to the purchase. A player who paid for space keeps every
+                // row and every item in it; the mod grants whatever is left and says so. The
+                // reverse - refusing the trader to protect a mod's bonus - would take a vanilla
+                // feature away to preserve something a mod added, which is the wrong way round,
+                // and it would not help a character that arrives already carrying nine rows.
+                var room = VanillaRows.Ceiling - rows;
+                if (room < 0) room = 0;
+
+                var claimed = InventoryRows.Total;
+                var granted = claimed < room ? claimed : room;
+
+                if (granted < claimed)
+                    InventoryRows.SayTruncated(rows, claimed, granted);
+
+                rows = rows + granted;
             }
             catch (System.Exception e)
             {
