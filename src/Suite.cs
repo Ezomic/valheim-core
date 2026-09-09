@@ -94,8 +94,16 @@ namespace Ezomic.Core
 
             _lastRegistered = guid;
 
+            // The caveat is part of the line rather than a separate warning, because the failure
+            // this guards against is one of reading rather than one of logging. A mod's
+            // "Registered ... (Everyone) build ..." is the sentence that says it is on the gate,
+            // and when the gate did not wire it is the sentence that is wrong - so it has to
+            // carry the correction itself. A warning three hundred lines earlier does not.
+            string caveat = CorePlugin.GateWired
+                ? "" : "  ** NOT ENFORCED, Core's version gate failed to apply **";
+
             CorePlugin.Log.LogInfo("Registered " + name + " " + version
-                + " (" + requirement + ") build " + entry.Fingerprint);
+                + " (" + requirement + ") build " + entry.Fingerprint + caveat);
         }
 
         /// <summary>

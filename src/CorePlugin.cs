@@ -48,6 +48,28 @@ namespace Ezomic.Core
         internal static ConfigEntry<bool> EnforceBuilds;
         internal static ConfigEntry<bool> EnforceConfig;
 
+        /// <summary>
+        /// Whether the handshake patches actually applied this session.
+        ///
+        /// It exists because of how a Core failure used to read in the log. Every mod calls
+        /// Suite.Register from its own Awake and gets back "Registered Yoke 1.1.0 (Everyone)
+        /// build a1b2c3", whether or not the ZNet patches that make that registration MEAN
+        /// anything ever went on. Twelve confident lines describing a gate that is not there,
+        /// and the only tell was the absence of one earlier line nobody greps for by habit.
+        /// Register consults this now, so the mod list itself says when it is unenforced.
+        /// </summary>
+        internal static bool GateWired { get; private set; }
+
+        /// <summary>Whether the host's settings will actually be imposed. Same argument.</summary>
+        internal static bool ConfigWired { get; private set; }
+
+        /// <summary>
+        /// Whether the extra inventory rows may be driven at all. False unless BOTH the rows and
+        /// their load protection applied, because rows claimed without that protection is the one
+        /// combination that silently destroys items.
+        /// </summary>
+        internal static bool RowsSafe { get; private set; }
+
         private Harmony _harmony;
 
         private void Awake()
@@ -75,25 +97,98 @@ namespace Ezomic.Core
                 "The host's settings win. Clients keep their own file untouched and get it "
                 + "back the moment they disconnect - nothing is overwritten on disk.");
 
+            _harmony = new Harmony(PluginGuid);
+
+            // Five groups, each applied so that its failure cannot take the others with it,
+            // and the inventory pair FIRST. Both of those are deliberate, and they were not
+            // always so.
+            //
+            // It used to be five bare PatchAll calls in the other order, and that arrangement
+            // has a failure mode worth naming because a game update is exactly what triggers
+            // it. A throw in NetworkPatches - one renamed ZNet method, one renamed `rpc` or
+            // `peer` parameter, since Harmony injects by name - propagated out of Awake, so
+            // the last two calls never ran. But the component was still added and Update()
+            // still ticked, so InventoryRows kept claiming extra rows from Update while the
+            // Player.Load prefix that protects those rows was absent. Inventory.Load's
+            // positional AddItem refuses anything outside the grid and its caller discards
+            // that result, so the item is instantiated, refused, destroyed, and the container
+            // saves again without it. Rows claimed with no load protection is the one
+            // combination that eats the bottom row on every relog and at every grave.
+            //
+            // So: protect the data first, then wire the network. If the gate cannot be
+            // applied, Core loses the gate. It no longer also loses the thing standing
+            // between a saved inventory and silent item destruction.
+            bool loadWired = Apply("inventory load protection", typeof(InventoryLoad));
+            bool rowsWired = Apply("inventory rows", typeof(InventoryRows));
+
+            // InventoryRows without InventoryLoad is worse than either alone, for the reason
+            // above, so the rows do not get to run half-protected.
+            //
+            // Refused by not driving them rather than by unpatching them. Harmony's Unpatch
+            // wants the original method, and an unpatch that itself throws would leave the rows
+            // live while this code had already logged that they were rolled back - a log that
+            // lies about item safety is worse than the bug. RowsSafe is read from Update, which
+            // is the only thing that makes InventoryRows do anything at all.
+            RowsSafe = rowsWired && loadWired;
+
+            if (rowsWired && !loadWired)
+                Log.LogError("Core applied its extra inventory rows but NOT the load protection "
+                    + "that keeps them safe, which would destroy every item in a claimed row on "
+                    + "the next relog and at every grave. The rows are being left undriven - the "
+                    + "inventory stays vanilla and nothing any mod claimed will be honoured.");
+
+            GateWired = Apply("version gate", typeof(NetworkPatches));
+            ConfigWired = Apply("config sync", typeof(ConfigSync));
+            Apply("connect-error text", typeof(ConnectError));
+
             // Core puts itself on its own gate. It was not on it before, which left the one
             // mod every other mod depends on as the only one whose mismatch went unreported -
             // and a Core mismatch is worse than any of theirs, because it is the handshake
             // itself that differs.
+            //
+            // After the patches now, not before: registering first meant Core announced itself
+            // into a gate it had not yet wired, and on the one run where the wiring fails that
+            // is precisely the wrong order to have logged in.
             Suite.Register(PluginGuid, PluginName, PluginVersion, Config, Requirement.Everyone,
                 typeof(CorePlugin).Assembly);
 
-            _harmony = new Harmony(PluginGuid);
-            _harmony.PatchAll(typeof(NetworkPatches));
-            _harmony.PatchAll(typeof(ConfigSync));
-            _harmony.PatchAll(typeof(ConnectError));
+            if (GateWired && ConfigWired && RowsSafe)
+            {
+                Log.LogInfo(PluginName + " " + PluginVersion + " by " + PluginAuthor + " - ready.");
+                return;
+            }
 
-            // InventoryRows was the one class here driven purely from Update, so it had
-            // never needed registering. It does now: its Player.Load prefix is what stops
-            // a character load destroying every item sitting in a claimed row.
-            _harmony.PatchAll(typeof(InventoryRows));
-            _harmony.PatchAll(typeof(InventoryLoad));
+            // Deliberately NOT the "ready." line. That line is what every other mod's absence
+            // check greps for, and printing it after a partial apply is how a broken Core reads
+            // as a working one.
+            Log.LogError(PluginName + " " + PluginVersion + " came up DEGRADED"
+                + (GateWired ? "" : " - no version gate, so mismatched builds are NOT refused")
+                + (ConfigWired ? "" : " - no config sync, so the host's settings are NOT imposed")
+                + (RowsSafe ? "" : " - no extra inventory rows")
+                + ". Read the errors above before playing on a shared world.");
+        }
 
-            Log.LogInfo(PluginName + " " + PluginVersion + " by " + PluginAuthor + " - ready.");
+        /// <summary>
+        /// One patch group, applied so that its failure cannot take the rest of Core with it.
+        ///
+        /// Harmony throws out of PatchAll when a target method cannot be resolved - a rename, a
+        /// changed signature, an ambiguous overload - which is ordinary on the first launch after
+        /// a game update. Catching per group turns "Core did nothing" into "Core lost one
+        /// feature", and names which.
+        /// </summary>
+        private bool Apply(string what, Type patches)
+        {
+            try
+            {
+                _harmony.PatchAll(patches);
+                return true;
+            }
+            catch (Exception e)
+            {
+                Log.LogError("Core could not apply its " + what + " patches, so that feature is "
+                    + "off for this session. The rest of Core is unaffected. " + e.Message);
+                return false;
+            }
         }
 
         /// <summary>
@@ -103,6 +198,11 @@ namespace Ezomic.Core
         /// </summary>
         private void Update()
         {
+            // The guard is here rather than inside Tick because this is the only caller, and
+            // because it has to cover the backdrop too: growing the wooden panel to fit rows
+            // that are not being claimed would leave a stretched, half-empty window.
+            if (!RowsSafe) return;
+
             InventoryRows.Tick();
             InventoryRows.Backdrop.Tick();
         }
