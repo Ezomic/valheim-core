@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -129,6 +130,11 @@ namespace Ezomic.Core
             // as an improvement.
             bool vanillaWired = Apply("inventory row eviction fence", typeof(VanillaRows));
 
+            // Applied is not attached. Both of these decide whether a player keeps what is in a
+            // granted row, so they are checked rather than assumed.
+            Verify(AccessTools.Method(typeof(Player), nameof(Player.SetInventorySize)),
+                   AccessTools.Method(typeof(Humanoid), nameof(Humanoid.DropInvalidItems)));
+
             // InventoryRows without InventoryLoad is worse than either alone, for the reason
             // above, so the rows do not get to run half-protected.
             //
@@ -174,6 +180,50 @@ namespace Ezomic.Core
                 + (ConfigWired ? "" : " - no config sync, so the host's settings are NOT imposed")
                 + (RowsSafe ? "" : " - no extra inventory rows")
                 + ". Read the errors above before playing on a shared world.");
+        }
+
+        /// <summary>
+        /// Count what actually attached, and say so.
+        ///
+        /// Twice in one day a patch here "applied" without patching anything: stacked
+        /// [HarmonyPatch] attributes that Harmony merged into one target, and then a class
+        /// describing two different target types that attached to neither. Both times PatchAll
+        /// returned cleanly, Core printed its ready line, and the feature was simply absent -
+        /// the second one was only caught because a log line that should have appeared on every
+        /// login never did.
+        ///
+        /// So the question "did it apply" is answered by asking Harmony which methods it holds
+        /// patches on, rather than by the absence of an exception. Anything expected and missing
+        /// is an error, because for these two methods missing means a player's items go on the
+        /// floor.
+        /// </summary>
+        private void Verify(params MethodBase[] expected)
+        {
+            foreach (var method in expected)
+            {
+                if (method == null) continue;
+
+                var info = Harmony.GetPatchInfo(method);
+                var owned = info != null
+                            && (Owns(info.Prefixes) || Owns(info.Postfixes) || Owns(info.Transpilers));
+
+                if (owned) continue;
+
+                Log.LogError("Core has NO patch on " + method.DeclaringType.Name + "."
+                    + method.Name + " despite applying cleanly. On Valheim 1.0 that method is "
+                    + "what decides whether items in mod-granted inventory rows are kept or "
+                    + "dropped on the ground - treat those rows as unsafe.");
+            }
+        }
+
+        private static bool Owns(IEnumerable<Patch> patches)
+        {
+            if (patches == null) return false;
+
+            foreach (var patch in patches)
+                if (patch.owner == PluginGuid) return true;
+
+            return false;
         }
 
         /// <summary>
