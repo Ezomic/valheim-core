@@ -6,7 +6,7 @@ namespace Ezomic.Core
     /// Contests the inventory height at the moment Valheim 1.0 asserts it, which is the only
     /// moment that counts.
     ///
-    /// **The bug this exists for, because it cost a player a stack of ten.** 1.0 grew its own
+    /// **The bug this exists for, because it cost a player four stacks.** 1.0 grew its own
     /// inventory-rows feature, and it evicts anything below the row count it believes in:
     ///
     ///     Game.SpawnPlayer          LoadPlayerData(player) -> player.OnSpawned(...)
@@ -30,150 +30,155 @@ namespace Ezomic.Core
     /// vanilla had already emptied. A postfix on OnSpawned is no better - DropInvalidItems has
     /// already run inside SetInventorySize by then.
     ///
-    /// **One class per patched method, deliberately.** The first version of this file was a
-    /// single class carrying a bare [HarmonyPatch] with three method-level attributes naming two
-    /// different types, and it silently attached nothing: the game ran, Core logged its ready
-    /// line, and the prefix below never fired once across three logins. Harmony's class
-    /// processor takes the class-level attribute as the target and merges the method ones into
-    /// it, so a class describing two targets describes neither reliably. A nested class per
-    /// target is unambiguous, and CorePlugin now counts the attachments at startup rather than
-    /// trusting that PatchAll returning cleanly means anything was patched.
+    /// **Two top-level classes, one per patched method, and it took three tries to get there.**
+    /// First shape: one class, a bare [HarmonyPatch], three method attributes naming two
+    /// different types - Harmony takes the class attribute as the target and merges the method
+    /// ones into it, so a class describing two targets describes neither, and nothing attached.
+    /// Second shape: nested classes per target - correct in isolation, but Harmony.PatchAll(Type)
+    /// does not recurse into nested types, so CorePlugin patched the outer shell and again
+    /// nothing attached. Both times the game ran, Core printed its ready line, and the only
+    /// symptom was a player's items on the floor.
+    ///
+    /// Hence CorePlugin.Verify: it asks Harmony which methods it actually holds patches on and
+    /// names any that are missing. That check is what caught the second failure at startup
+    /// instead of after another round of losing things.
     /// </summary>
     internal static class VanillaRows
     {
         /// <summary>
         /// Vanilla's own key for the row count. Reading it is not required - the value arrives
         /// as SetInventorySize's argument - but the postfix has to write it back.
+        ///
+        /// Internal rather than private because the two patch classes below are siblings now,
+        /// not nested, and both halves of the mechanism have to agree on the spelling.
         /// </summary>
-        private const string RowsKey = "invrows";
+        internal const string RowsKey = "invrows";
+    }
 
-        /// <summary>Where vanilla decides how tall the grid is, and then enforces it.</summary>
-        [HarmonyPatch(typeof(Player), nameof(Player.SetInventorySize))]
-        internal static class SizePatch
+    /// <summary>Where vanilla decides how tall the grid is, and then enforces it.</summary>
+    [HarmonyPatch(typeof(Player), nameof(Player.SetInventorySize))]
+    internal static class VanillaRowsSize
+    {
+        /// <summary>
+        /// Take vanilla's number as the base and hand back the total, before anything is applied.
+        ///
+        /// A prefix and not a postfix, and the ordering inside SetInventorySize is the reason:
+        /// Mathf.Clamp, SetHeight, AddUniqueKeyValue, InventoryGui.SetInventorySize and
+        /// DropInvalidItems all run after this returns. Growing the number here means the grid is
+        /// already tall enough when vanilla scans it, so nothing is ever invalid, and the
+        /// inventory panel is sized to the number Core believes in rather than fighting it.
+        ///
+        /// The incoming value is a better baseline than reading the height ever was: it is
+        /// vanilla's own count, before any mod touched anything, and it follows a player who buys
+        /// rows through vanilla's shop - which the old measured baseline could not tell apart
+        /// from a mod's grant.
+        /// </summary>
+        [HarmonyPrefix]
+        private static void Grow(Player __instance, ref int rows)
         {
-            /// <summary>
-            /// Take vanilla's number as the base and hand back the total, before anything is
-            /// applied.
-            ///
-            /// A prefix and not a postfix, and the ordering inside SetInventorySize is the
-            /// reason: Mathf.Clamp, SetHeight, AddUniqueKeyValue, InventoryGui.SetInventorySize
-            /// and DropInvalidItems all run after this returns. Growing the number here means
-            /// the grid is already tall enough when vanilla scans it, so nothing is ever
-            /// invalid, and the inventory panel is sized to the number Core believes in rather
-            /// than fighting it.
-            ///
-            /// The incoming value is a better baseline than reading the height ever was: it is
-            /// vanilla's own count, before any mod touched anything, and it follows a player who
-            /// buys rows through vanilla's shop - which the old measured baseline could not tell
-            /// apart from a mod's grant.
-            /// </summary>
-            [HarmonyPrefix]
-            private static void Grow(Player __instance, ref int rows)
+            try
             {
-                try
-                {
-                    // Plain == null and ReferenceEquals, never ?. - Unity overloads equality and
-                    // the null-propagating operators sail past a destroyed object.
-                    if (__instance == null) return;
-                    if (!ReferenceEquals(__instance, Player.m_localPlayer)) return;
+                // Plain == null and ReferenceEquals, never ?. - Unity overloads equality and the
+                // null-propagating operators sail past a destroyed object.
+                if (__instance == null) return;
+                if (!ReferenceEquals(__instance, Player.m_localPlayer)) return;
 
-                    InventoryRows.LearnBase(rows);
-                    rows = rows + InventoryRows.Total;
-                }
-                catch (System.Exception e)
-                {
-                    CorePlugin.Log.LogError("Core could not claim its inventory rows from "
-                        + "SetInventorySize, so this login gets vanilla's height and anything in "
-                        + "a granted row is about to be dropped. " + e.Message);
-                }
+                InventoryRows.LearnBase(rows);
+                rows = rows + InventoryRows.Total;
             }
-
-            /// <summary>
-            /// Put vanilla's own number back in the character.
-            ///
-            /// This is not tidiness, it is the difference between working and growing without
-            /// bound. SetInventorySize ends with AddUniqueKeyValue("invrows", rows.ToString()),
-            /// so it persists whatever the prefix above handed it. Leave that and the next login
-            /// reads six, treats six as the base, writes eight, and the character gains the
-            /// claim total on every load until vanilla's clamp of nine stops it.
-            ///
-            /// Writing the base back also means uninstalling Core leaves a plain character. The
-            /// cost is that vanilla then drops whatever sat in the granted rows - on the ground,
-            /// not into nothing, which is the honest outcome for rows nothing is providing.
-            /// </summary>
-            [HarmonyPostfix]
-            private static void Restore(Player __instance)
+            catch (System.Exception e)
             {
-                try
-                {
-                    if (__instance == null) return;
-                    if (!ReferenceEquals(__instance, Player.m_localPlayer)) return;
-
-                    var vanilla = InventoryRows.Base;
-                    if (vanilla < 0) return;
-
-                    __instance.AddUniqueKeyValue(RowsKey, vanilla.ToString());
-                }
-                catch (System.Exception e)
-                {
-                    CorePlugin.Log.LogError("Core could not restore the vanilla row count in the "
-                        + "character, so the saved value now includes Core's rows and will "
-                        + "compound on the next login. " + e.Message);
-                }
+                CorePlugin.Log.LogError("Core could not claim its inventory rows from "
+                    + "SetInventorySize, so this login gets vanilla's height and anything in a "
+                    + "granted row is about to be dropped. " + e.Message);
             }
         }
 
-        /// <summary>Where vanilla throws out anything below the height it just set.</summary>
-        [HarmonyPatch(typeof(Humanoid), nameof(Humanoid.DropInvalidItems))]
-        internal static class DropPatch
+        /// <summary>
+        /// Put vanilla's own number back in the character.
+        ///
+        /// This is not tidiness, it is the difference between working and growing without bound.
+        /// SetInventorySize ends with AddUniqueKeyValue("invrows", rows.ToString()), so it
+        /// persists whatever the prefix above handed it. Leave that and the next login reads six,
+        /// treats six as the base, writes eight, and the character gains the claim total on every
+        /// load until vanilla's clamp of nine stops it.
+        ///
+        /// Writing the base back also means uninstalling Core leaves a plain character. The cost
+        /// is that vanilla then drops whatever sat in the granted rows - on the ground, not into
+        /// nothing, which is the honest outcome for rows nothing is providing.
+        /// </summary>
+        [HarmonyPostfix]
+        private static void Restore(Player __instance)
         {
-            /// <summary>
-            /// Nothing standing in the grid gets thrown out, whatever the height says.
-            ///
-            /// The prefix above already prevents the ordinary case, so this is the fence rather
-            /// than the fix - and it is the half that must not be skipped. SetInventorySize
-            /// clamps to nine, so claims past five granted rows would be truncated and
-            /// everything below nine evicted; and DropInvalidItems has other callers, including
-            /// the console's inventory clean-up.
-            ///
-            /// Widening to what the items actually occupy, rather than to base plus claims, is
-            /// deliberate: the question here is only "is anything about to be thrown away", and
-            /// the answer must not depend on what any mod is currently claiming.
-            ///
-            /// It does neuter a console command meant to clear a stuck inventory. That is the
-            /// right trade against dropping someone's things on the floor unasked.
-            /// </summary>
-            [HarmonyPrefix]
-            private static void Hold(Humanoid __instance)
+            try
             {
-                try
+                if (__instance == null) return;
+                if (!ReferenceEquals(__instance, Player.m_localPlayer)) return;
+
+                var vanilla = InventoryRows.Base;
+                if (vanilla < 0) return;
+
+                __instance.AddUniqueKeyValue(VanillaRows.RowsKey, vanilla.ToString());
+            }
+            catch (System.Exception e)
+            {
+                CorePlugin.Log.LogError("Core could not restore the vanilla row count in the "
+                    + "character, so the saved value now includes Core's rows and will compound "
+                    + "on the next login. " + e.Message);
+            }
+        }
+    }
+
+    /// <summary>Where vanilla throws out anything below the height it just set.</summary>
+    [HarmonyPatch(typeof(Humanoid), nameof(Humanoid.DropInvalidItems))]
+    internal static class VanillaRowsDrop
+    {
+        /// <summary>
+        /// Nothing standing in the grid gets thrown out, whatever the height says.
+        ///
+        /// The prefix in VanillaRowsSize already prevents the ordinary case, so this is the fence
+        /// rather than the fix - and it is the half that must not be skipped. SetInventorySize
+        /// clamps to nine, so claims past five granted rows would be truncated and everything
+        /// below nine evicted; and DropInvalidItems has other callers, including the console's
+        /// inventory clean-up.
+        ///
+        /// Widening to what the items actually occupy, rather than to base plus claims, is
+        /// deliberate: the question here is only "is anything about to be thrown away", and the
+        /// answer must not depend on what any mod is currently claiming.
+        ///
+        /// It does neuter a console command meant to clear a stuck inventory. That is the right
+        /// trade against dropping someone's things on the floor unasked.
+        /// </summary>
+        [HarmonyPrefix]
+        private static void Hold(Humanoid __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+                if (!ReferenceEquals(__instance, Player.m_localPlayer)) return;
+
+                var inventory = __instance.GetInventory();
+                if (inventory == null) return;
+
+                var occupied = 0;
+                foreach (var item in inventory.GetAllItems())
                 {
-                    if (__instance == null) return;
-                    if (!ReferenceEquals(__instance, Player.m_localPlayer)) return;
-
-                    var inventory = __instance.GetInventory();
-                    if (inventory == null) return;
-
-                    var occupied = 0;
-                    foreach (var item in inventory.GetAllItems())
-                    {
-                        if (item == null) continue;
-                        if (item.m_gridPos.y + 1 > occupied) occupied = item.m_gridPos.y + 1;
-                    }
-
-                    if (occupied <= inventory.GetHeight()) return;
-
-                    CorePlugin.Log.LogWarning("Vanilla was about to drop items from rows below "
-                        + "its own count - holding the grid at " + occupied + " rows so nothing "
-                        + "is thrown on the ground. Rows claimed: " + InventoryRows.Total + ".");
-
-                    inventory.SetHeight(occupied);
+                    if (item == null) continue;
+                    if (item.m_gridPos.y + 1 > occupied) occupied = item.m_gridPos.y + 1;
                 }
-                catch (System.Exception e)
-                {
-                    CorePlugin.Log.LogError("Core could not fence DropInvalidItems, so vanilla "
-                        + "may drop items from rows it does not know about. " + e.Message);
-                }
+
+                if (occupied <= inventory.GetHeight()) return;
+
+                CorePlugin.Log.LogWarning("Vanilla was about to drop items from rows below its "
+                    + "own count - holding the grid at " + occupied + " rows so nothing is thrown "
+                    + "on the ground. Rows claimed: " + InventoryRows.Total + ".");
+
+                inventory.SetHeight(occupied);
+            }
+            catch (System.Exception e)
+            {
+                CorePlugin.Log.LogError("Core could not fence DropInvalidItems, so vanilla may "
+                    + "drop items from rows it does not know about. " + e.Message);
             }
         }
     }

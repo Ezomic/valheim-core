@@ -128,7 +128,11 @@ namespace Ezomic.Core
             // Core always loses. Without this group the extra rows are not merely absent - they
             // empty onto the ground - which is why RowsSafe requires it rather than treating it
             // as an improvement.
-            bool vanillaWired = Apply("inventory row eviction fence", typeof(VanillaRows));
+            // Both classes, because Harmony.PatchAll(Type) does not recurse into nested types
+            // and does not follow a holder class to its siblings - it patches exactly the type it
+            // is handed. Patching VanillaRows alone attached nothing twice over.
+            bool vanillaWired = Apply("inventory row claim", typeof(VanillaRowsSize))
+                              & Apply("inventory row eviction fence", typeof(VanillaRowsDrop));
 
             // Applied is not attached. Both of these decide whether a player keeps what is in a
             // granted row, so they are checked rather than assumed.
