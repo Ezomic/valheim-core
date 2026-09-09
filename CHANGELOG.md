@@ -3,6 +3,37 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
+## [1.2.0] - 2026-09-09
+
+Rebuilt for Valheim 1.0. This version does not run on pre-1.0 Valheim, and the previous
+one does not run on 1.0.
+
+### Fixed
+
+- **A failure in one patch group no longer takes the others with it, and the inventory
+  patches apply first.** They used to be five bare `PatchAll` calls with the ZNet handshake
+  leading. A throw there meant the last two never ran - while the component was still added
+  and `Update` still ticked, so the extra inventory rows kept being claimed with the
+  `Player.Load` protection that keeps items in them absent. That combination destroys the
+  bottom row on every relog and at every grave. Protect the data first, then wire the network.
+- **The inventory load protection applies again on Valheim 1.0.** 1.0 added a second
+  `Inventory.Load` overload, so naming the method alone became an ambiguous match and Harmony
+  refused it. Both overloads are named now. This is exactly the failure the reordering above
+  was written for, and it arrived on the first launch against 1.0 - the rows were refused and
+  the reason was on screen, instead of items going quietly missing.
+- **A HostOnly mod is now allowed to be absent on either end.** The manifest always sent each
+  mod's requirement and the reading end threw it away, so `HostOnly` only ever protected the
+  direction where the *client* lacked the mod. A Core server without Skaft refused every
+  client that had it - which is why Skaft shipped standalone and stayed out of the pack for a
+  week. It is in the pack now.
+
+### Changed
+
+- **The log says when the gate is not actually there.** Every mod's `Registered ...` line
+  carries `** NOT ENFORCED **` when the handshake patches did not apply, and Core prints
+  `came up DEGRADED` naming what is missing rather than its usual `ready.` line. Twelve
+  confident lines describing a gate that was never wired is how this used to read.
+
 ## [1.1.0] - 2026-08-23
 
 Two changes, both about who owns what. Neither touches a prefab name or a saved value, so
