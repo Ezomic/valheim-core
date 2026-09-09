@@ -313,12 +313,16 @@ namespace Ezomic.Core
             if (_height == null) _height = AccessTools.Field(typeof(Inventory), "m_height");
             if (_height == null) return;
 
-            // The baseline is captured here, before the widening, or the next tick would
-            // read the widened value as vanilla and add every claim on top of it - and then
-            // do it again on the following load. That compounds, which is the exact failure
-            // the per-player capture at the top of Tick exists to avoid.
-            _player = __instance;
-            _base = inventory.GetHeight();
+            // The baseline is NOT captured here any more, and that is the point. This used to
+            // set _player and _base = inventory.GetHeight(), which quietly made it the winner of
+            // a race it should not have been in: it runs before Player.OnSpawned, so LearnBase
+            // then found _base and _player already matching and early-returned, and the line
+            // that says which number vanilla gave us never printed. The mechanism worked and was
+            // unobservable, which is how two earlier failures in this same feature went unnoticed.
+            //
+            // Measuring was also the fragile half. GetHeight() is whatever the grid happens to be
+            // right now; SetInventorySize is handed vanilla's own count before anything touches
+            // it. LearnBase owns the baseline now and this only opens working space for the load.
             _applied = -1;
             _widened = true;
 
