@@ -49,6 +49,7 @@ namespace Ezomic.Core
     /// blast radius of being wrong here is a container that draws a row taller than its
     /// prefab until it is emptied.
     /// </summary>
+    [HarmonyPatch]
     internal static class InventoryLoad
     {
         private static FieldInfo _height;
@@ -75,9 +76,48 @@ namespace Ezomic.Core
         // so naming the method alone is now an ambiguous match and Harmony refuses it. The two
         // bodies are the same work and either can be the one a container or a player arrives
         // through, so both are patched rather than a guess being made about which matters.
+        /// <summary>
+        /// Both Load overloads, returned as a list rather than stacked as attributes.
+        ///
+        /// This is the correction to a fix made earlier the same day, and the failure is worth
+        /// recording because it looked like it worked. Valheim 1.0 added Load(ZPackage, bool)
+        /// beside Load(ZPackage), which made naming the method alone ambiguous, and the first
+        /// attempt at naming both was two [HarmonyPatch] attributes stacked on each patch
+        /// method. Harmony does not read that as two targets: stacked attributes are MERGED
+        /// into one HarmonyMethod, so the later argument list simply replaced the earlier one
+        /// and only Load(ZPackage, bool) was ever patched.
+        ///
+        /// Nothing said so. The patch applied cleanly to a real method, Core printed its
+        /// ready line, and the player inventory - which goes through Player.Load and therefore
+        /// through the single-argument overload - was left unprotected.
+        ///
+        /// A missing overload is reported rather than silently skipped, because an empty
+        /// target list is the one outcome Harmony treats as success while doing nothing.
+        /// </summary>
+        [HarmonyTargetMethods]
+        private static IEnumerable<MethodBase> Targets()
+        {
+            var found = new List<MethodBase>();
+
+            var one = AccessTools.Method(typeof(Inventory), nameof(Inventory.Load),
+                                         new[] { typeof(ZPackage) });
+            var two = AccessTools.Method(typeof(Inventory), nameof(Inventory.Load),
+                                         new[] { typeof(ZPackage), typeof(bool) });
+
+            if (one != null) found.Add(one);
+            if (two != null) found.Add(two);
+
+            if (one == null)
+                CorePlugin.Log.LogError("Inventory.Load(ZPackage) is gone - the player's own "
+                    + "inventory is the one that loads through it, so its rows are unprotected.");
+
+            if (found.Count == 0)
+                CorePlugin.Log.LogError("No Inventory.Load overload could be found at all.");
+
+            return found;
+        }
+
         [HarmonyPrefix]
-        [HarmonyPatch(typeof(Inventory), nameof(Inventory.Load), typeof(ZPackage))]
-        [HarmonyPatch(typeof(Inventory), nameof(Inventory.Load), typeof(ZPackage), typeof(bool))]
         private static void Widen(Inventory __instance, out int __state)
         {
             __state = -1;
@@ -101,8 +141,6 @@ namespace Ezomic.Core
         /// height on its own.
         /// </summary>
         [HarmonyPostfix]
-        [HarmonyPatch(typeof(Inventory), nameof(Inventory.Load), typeof(ZPackage))]
-        [HarmonyPatch(typeof(Inventory), nameof(Inventory.Load), typeof(ZPackage), typeof(bool))]
         private static void Trim(Inventory __instance, int __state)
         {
             if (__instance == null || __state < 0 || _height == null) return;
