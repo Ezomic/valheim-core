@@ -37,6 +37,17 @@ namespace Ezomic.Core
 
             /// <summary>Hash of the mod's data file, when it declares one. Empty otherwise.</summary>
             public string Data;
+
+            /// <summary>
+            /// What the far end says this mod requires. Kept now, where it used to be read and
+            /// thrown away with the note "ours is what we enforce".
+            ///
+            /// That was right for the loop over our own mods - we have the entry, so we know
+            /// the requirement first-hand and do not need theirs. It was wrong for the loop
+            /// over theirs, which is exactly the case where we do NOT have the mod and so have
+            /// no requirement of our own to consult. See the far-end loop in Compare.
+            /// </summary>
+            public Requirement Requirement;
         }
 
         [HarmonyPostfix]
@@ -85,12 +96,21 @@ namespace Ezomic.Core
             {
                 string guid = pkg.ReadString();
                 string version = pkg.ReadString();
-                pkg.ReadInt(); // their view of the requirement; ours is what we enforce
+                int requirement = pkg.ReadInt();
 
                 string fingerprint = pkg.GetPos() < pkg.Size() ? pkg.ReadString() : "";
                 string data = pkg.GetPos() < pkg.Size() ? pkg.ReadString() : "";
 
-                theirs[guid] = new RemoteMod { Version = version, Fingerprint = fingerprint, Data = data };
+                theirs[guid] = new RemoteMod
+                {
+                    Version = version,
+                    Fingerprint = fingerprint,
+                    Data = data,
+                    // Clamped rather than cast blind: an unknown value from a newer Core must
+                    // read as the strict answer, not fall through to the permissive one.
+                    Requirement = requirement == (int)Requirement.HostOnly
+                        ? Requirement.HostOnly : Requirement.Everyone,
+                };
             }
 
             Received[rpc] = theirs;
@@ -254,6 +274,26 @@ namespace Ezomic.Core
             foreach (KeyValuePair<string, RemoteMod> pair in theirs)
             {
                 if (Suite.Mods.ContainsKey(pair.Key)) continue;
+
+                // A mod that declared itself HostOnly is declaring that its absence on one end
+                // is acceptable, and that has to hold in BOTH directions or the marking means
+                // nothing. The loop above already honours it where we hold the mod; this is the
+                // mirror, and its absence is what made HostOnly a half-measure.
+                //
+                // The symptom was concrete and cost a release: Skaft is HostOnly and stayed out
+                // of the pack because a Core server without it refused every client that had
+                // it. Nothing about that is Skaft's fault - it is client-side hammer repair and
+                // the server neither gains nor loses by a client having it - and the refusal
+                // came from here, three lines that never asked what the mod had declared. The
+                // requirement was on the wire the whole time and was being discarded on read.
+                //
+                // This does trust the far end's word about its own mod. That is the right trade
+                // for this gate, whose job is stopping accidental mismatch between people who
+                // are all running the same suite - a client that lies here gains only the
+                // ability to carry a mod whose ZDOs this end will discard anyway, which costs
+                // it and not us. Policing what a client actually runs is Dyrr's job, and Dyrr
+                // reads the mod list rather than taking a flag's word for it.
+                if (pair.Value.Requirement == Requirement.HostOnly) continue;
 
                 Append(ref problems, "  " + pair.Key + " " + pair.Value.Version
                     + " is on the other end but not this one.");
