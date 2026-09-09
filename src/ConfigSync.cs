@@ -176,34 +176,6 @@ namespace Ezomic.Core
         /// </summary>
         [HarmonyPostfix]
         [HarmonyPatch(typeof(ZNet), "Shutdown")]
-        /// <summary>
-        /// Swap a value without BepInEx writing the file.
-        ///
-        /// ConfigEntry.BoxedValue's setter calls ConfigFile.Save when SaveOnConfigSet is true,
-        /// which it is by default - so every imposed value was being written straight into the
-        /// player's own .cfg on disk. This file's own summary says "Nothing is written to the
-        /// client's config file" and the log line says "Your own config file is untouched", and
-        /// both were false. The consequence is not cosmetic: a client that crashes or is killed
-        /// while connected never runs the restore, so the host's values are stranded in that
-        /// player's config and silently govern their next singleplayer evening.
-        ///
-        /// The flag is restored rather than left off, because it is the mod's own setting and
-        /// Core is borrowing it for one assignment.
-        /// </summary>
-        private static void SetQuietly(ConfigFile file, ConfigEntryBase entry, object value)
-        {
-            if (file == null)
-            {
-                entry.BoxedValue = value;
-                return;
-            }
-
-            var prior = file.SaveOnConfigSet;
-            file.SaveOnConfigSet = false;
-            try { entry.BoxedValue = value; }
-            finally { file.SaveOnConfigSet = prior; }
-        }
-
         private static void RestoreOnShutdown()
         {
             if (Original.Count == 0) return;
@@ -226,6 +198,41 @@ namespace Ezomic.Core
 
             Original.Clear();
             Imposed.Clear();
+        }
+
+
+        /// <summary>
+        /// Swap a value without BepInEx writing the file.
+        ///
+        /// ConfigEntry.BoxedValue's setter calls ConfigFile.Save when SaveOnConfigSet is true,
+        /// which it is by default - so every imposed value was being written straight into the
+        /// player's own .cfg on disk. This file's own summary says "Nothing is written to the
+        /// client's config file" and the log line says "Your own config file is untouched", and
+        /// both were false. The consequence is not cosmetic: a client that crashes or is killed
+        /// while connected never runs the restore, so the host's values are stranded in that
+        /// player's config and silently govern their next singleplayer evening.
+        ///
+        /// The flag is restored rather than left off, because it is the mod's own setting and
+        /// Core is borrowing it for one assignment.
+        ///
+        /// It lives here, well away from the patch methods, because the first attempt inserted it
+        /// BETWEEN [HarmonyPostfix]/[HarmonyPatch] and the method they belonged to. Attributes
+        /// bind to whatever declaration follows them, so this became the ZNet.Shutdown postfix -
+        /// Harmony tried to inject a ZNet parameter named "file", the whole config-sync group
+        /// failed to patch, and RestoreOnShutdown quietly stopped being wired at all.
+        /// </summary>
+        private static void SetQuietly(ConfigFile file, ConfigEntryBase entry, object value)
+        {
+            if (file == null)
+            {
+                entry.BoxedValue = value;
+                return;
+            }
+
+            var prior = file.SaveOnConfigSet;
+            file.SaveOnConfigSet = false;
+            try { entry.BoxedValue = value; }
+            finally { file.SaveOnConfigSet = prior; }
         }
 
         /// <summary>
