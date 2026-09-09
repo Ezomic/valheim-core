@@ -71,8 +71,13 @@ namespace Ezomic.Core
         /// inventory arrives here already widened by InventoryRows, and this restores what it
         /// found instead of overwriting it with a computed value.
         /// </summary>
+        // Valheim 1.0 added a second Load overload - Load(ZPackage, bool) beside Load(ZPackage) -
+        // so naming the method alone is now an ambiguous match and Harmony refuses it. The two
+        // bodies are the same work and either can be the one a container or a player arrives
+        // through, so both are patched rather than a guess being made about which matters.
         [HarmonyPrefix]
-        [HarmonyPatch(typeof(Inventory), nameof(Inventory.Load))]
+        [HarmonyPatch(typeof(Inventory), nameof(Inventory.Load), typeof(ZPackage))]
+        [HarmonyPatch(typeof(Inventory), nameof(Inventory.Load), typeof(ZPackage), typeof(bool))]
         private static void Widen(Inventory __instance, out int __state)
         {
             __state = -1;
@@ -96,7 +101,8 @@ namespace Ezomic.Core
         /// height on its own.
         /// </summary>
         [HarmonyPostfix]
-        [HarmonyPatch(typeof(Inventory), nameof(Inventory.Load))]
+        [HarmonyPatch(typeof(Inventory), nameof(Inventory.Load), typeof(ZPackage))]
+        [HarmonyPatch(typeof(Inventory), nameof(Inventory.Load), typeof(ZPackage), typeof(bool))]
         private static void Trim(Inventory __instance, int __state)
         {
             if (__instance == null || __state < 0 || _height == null) return;
