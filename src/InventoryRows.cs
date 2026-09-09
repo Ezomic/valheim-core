@@ -60,6 +60,46 @@ namespace Ezomic.Core
         private const int LoadSlack = 16;
 
         /// <summary>
+        /// Vanilla's own row count for this character, as it was before Core touched anything.
+        ///
+        /// -1 until it is known. See <see cref="LearnBase"/> for why it is learned rather than
+        /// measured.
+        /// </summary>
+        internal static int Base
+        {
+            get { return _base; }
+        }
+
+        /// <summary>
+        /// Take vanilla's row count from the one place that states it plainly.
+        ///
+        /// This used to be measured - _base = inventory.GetHeight() on first sight of the player
+        /// - and on Valheim 1.0 that is wrong in a way that compounds. 1.0 asserts the height
+        /// from the character's own "invrows" key inside SpawnPlayer, so by the time Update runs
+        /// the height already includes whatever Core wrote last time. Measuring it would read
+        /// six, add the claims again, and grow the grid on every login.
+        ///
+        /// VanillaRows calls this from a prefix on Player.SetInventorySize with the argument
+        /// vanilla passed, which is its number and nobody else's.
+        ///
+        /// It also stands in for the first-sight branch in Tick: setting _player here is what
+        /// stops that branch measuring the height and overwriting this.
+        /// </summary>
+        internal static void LearnBase(int vanillaRows)
+        {
+            var player = Player.m_localPlayer;
+
+            if (_base == vanillaRows && ReferenceEquals(player, _player)) return;
+
+            _player = player;
+            _base = vanillaRows;
+            _applied = -1;
+            _effective = -1;
+
+            CorePlugin.Log.LogInfo("Inventory rows: vanilla says " + vanillaRows + ".");
+        }
+
+        /// <summary>
         /// Ask for <paramref name="rows"/> extra rows, replacing whatever this mod asked for
         /// before. Zero gives them back. Cheap to call every frame.
         /// </summary>
@@ -133,11 +173,28 @@ namespace Ezomic.Core
             if (!ReferenceEquals(player, _player))
             {
                 _player = player;
-                _base = inventory.GetHeight();
                 _applied = -1;
                 _effective = -1;
 
-                CorePlugin.Log.LogInfo("Inventory rows: vanilla height is " + _base + ".");
+                // Measured only as a fallback, and it is the wrong number whenever
+                // Player.SetInventorySize has run - which on Valheim 1.0 is every spawn, before
+                // this ever ticks. LearnBase sets _player as well as _base, so reaching here
+                // with a base already known means the prefix did not fire: the patch failed, or
+                // this build of the game does not call SetInventorySize at all.
+                //
+                // Reading the height then is the best guess available, and it is announced as a
+                // guess, because if the prefix is not running the eviction fence probably is not
+                // either and rows five and six are not safe.
+                if (_base < 0)
+                {
+                    _base = inventory.GetHeight();
+
+                    CorePlugin.Log.LogWarning("Inventory rows: vanilla height measured as "
+                        + _base + " because Player.SetInventorySize never told us. On Valheim "
+                        + "1.0 that patch is what keeps granted rows from being emptied onto "
+                        + "the ground - treat rows above " + _base + " as unsafe until the "
+                        + "errors above are fixed.");
+                }
             }
 
             // Nothing has asked yet. Core writing 4 + 0 on the first frame, before any mod's

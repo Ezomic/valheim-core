@@ -121,6 +121,14 @@ namespace Ezomic.Core
             bool loadWired = Apply("inventory load protection", typeof(InventoryLoad));
             bool rowsWired = Apply("inventory rows", typeof(InventoryRows));
 
+            // The one that actually keeps the granted rows, on Valheim 1.0. Vanilla asserts the
+            // inventory height from the character's own key inside SpawnPlayer and drops
+            // everything below it in the same frame, so writing the height from Update is a race
+            // Core always loses. Without this group the extra rows are not merely absent - they
+            // empty onto the ground - which is why RowsSafe requires it rather than treating it
+            // as an improvement.
+            bool vanillaWired = Apply("inventory row eviction fence", typeof(VanillaRows));
+
             // InventoryRows without InventoryLoad is worse than either alone, for the reason
             // above, so the rows do not get to run half-protected.
             //
@@ -129,9 +137,9 @@ namespace Ezomic.Core
             // live while this code had already logged that they were rolled back - a log that
             // lies about item safety is worse than the bug. RowsSafe is read from Update, which
             // is the only thing that makes InventoryRows do anything at all.
-            RowsSafe = rowsWired && loadWired;
+            RowsSafe = rowsWired && loadWired && vanillaWired;
 
-            if (rowsWired && !loadWired)
+            if (rowsWired && !(loadWired && vanillaWired))
                 Log.LogError("Core applied its extra inventory rows but NOT the load protection "
                     + "that keeps them safe, which would destroy every item in a claimed row on "
                     + "the next relog and at every grave. The rows are being left undriven - the "
