@@ -3,7 +3,7 @@
 Shared plumbing for the Ezomic mods. You do not install this on purpose; every mod in the
 suite depends on it, and your mod manager fetches it for you.
 
-Built against the installed game (0.221.12, Unity 6000.0.61, BepInEx 5.4.23.3, Harmony 2.9).
+Built against the installed game (1.0.7, Unity 6000.0.75, BepInEx 5.4.23.5, Harmony 2.9).
 Single DLL, no assets.
 
 ## What it does

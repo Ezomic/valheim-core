@@ -5,6 +5,6 @@
   "website_url": "https://github.com/Ezomic/valheim-core",
   "description": "Shared plumbing for the Ezomic mods. Installed for you as a dependency.",
   "dependencies": [
-    "denikson-BepInExPack_Valheim-5.4.2333"
+    "denikson-BepInExPack_Valheim-5.4.2350"
   ]
 }
