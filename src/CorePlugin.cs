@@ -35,7 +35,7 @@ namespace Ezomic.Core
     {
         public const string PluginGuid = "ezomic.valheim.core";
         public const string PluginName = "Core";
-        public const string PluginVersion = "1.2.1";
+        public const string PluginVersion = "1.2.2";
         public const string PluginAuthor = "Robbin Thijssen";
 
         internal static ManualLogSource Log;
@@ -132,11 +132,13 @@ namespace Ezomic.Core
             // and does not follow a holder class to its siblings - it patches exactly the type it
             // is handed. Patching VanillaRows alone attached nothing twice over.
             bool vanillaWired = Apply("inventory row claim", typeof(VanillaRowsSize))
-                              & Apply("inventory row eviction fence", typeof(VanillaRowsDrop));
+                              & Apply("inventory row eviction fence", typeof(VanillaRowsDrop))
+                              & Apply("inventory row baseline", typeof(VanillaRowsSpawn));
 
             // Applied is not attached. Both of these decide whether a player keeps what is in a
             // granted row, so they are checked rather than assumed.
-            Verify(AccessTools.Method(typeof(Player), nameof(Player.SetInventorySize)),
+            Verify(AccessTools.Method(typeof(Player), nameof(Player.OnSpawned)),
+                   AccessTools.Method(typeof(Player), nameof(Player.SetInventorySize)),
                    AccessTools.Method(typeof(Humanoid), nameof(Humanoid.DropInvalidItems)));
 
             // InventoryRows without InventoryLoad is worse than either alone, for the reason

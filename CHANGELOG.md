@@ -3,6 +3,37 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
+## [1.2.2] - 2026-09-10
+
+### Fixed
+
+- **A character logging into 1.0 for the first time came up with a fifteen row inventory.**
+  Valheim 1.0.7's `Player.OnSpawned` only calls `SetInventorySize` when the character already
+  carries an `invrows` key, and otherwise just writes the key and returns. Every character
+  made before 1.0 takes that second branch exactly once, on its first 1.0 login, so the prefix
+  that learns vanilla's row count never fired and the baseline stayed at -1. The load-time
+  widening then added its sixteen rows of working space to that -1 and the grid came up
+  fifteen tall, after which the fallback measured the widened grid and adopted fifteen as
+  vanilla's own height.
+
+  Two changes. `Player.OnSpawned` now has a postfix that reads `invrows` back and learns the
+  baseline from it, which is correct on both branches rather than only the broken one: on the
+  else branch it returns the 4 vanilla just wrote, and on the other one `Restore` has already
+  put the true base back into that key, so it is a no-op. And the widening now works from a
+  height that exists rather than from an unlearned baseline, with the pre-widening height kept
+  so the fallback can no longer measure the working space and mistake it for the inventory.
+
+  No items were ever at risk - the eviction fence in `VanillaRowsDrop` holds the grid at
+  whatever rows are occupied, and it did. The condition also clears itself on the next login,
+  because vanilla wrote the key on the way through. It was wrong and alarming rather than
+  destructive.
+
+  Found on the live server an hour after updating it, reported as "i logged in and i have a 15
+  row inventory". Fifteen is `LoadSlack - 1`, which is what identified it.
+
+  `Player.OnSpawned` is now in `CorePlugin.Verify`'s list, so a future failure to attach that
+  patch is named at startup instead of showing up as a strange row count.
+
 ## [1.2.1] - 2026-09-10
 
 **1.2.0 shipped the wrong binary. If you have it, replace it.** The package published under

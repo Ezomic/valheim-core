@@ -40,6 +40,15 @@ namespace Ezomic.Core
         private static bool _widened;
 
         /// <summary>
+        /// The grid height as it stood immediately before a load widened it, or -1.
+        ///
+        /// This is NOT the baseline and must never be treated as one - LearnBase owns that.
+        /// It exists because the fallback below used to read GetHeight() after the widening
+        /// had already happened, which measures the working space rather than the inventory.
+        /// </summary>
+        private static int _preWiden = -1;
+
+        /// <summary>
         /// The height last written to the grid, which is not base + claims: it is that or
         /// what the items occupy, whichever is larger. Anything that has to match the grid
         /// reads this and nothing else.
@@ -208,7 +217,9 @@ namespace Ezomic.Core
                 // either and rows five and six are not safe.
                 if (_base < 0)
                 {
-                    _base = inventory.GetHeight();
+                    // The pre-widening height when a load has just happened, because
+                    // GetHeight() at this moment is the working space and not the inventory.
+                    _base = _widened && _preWiden >= 0 ? _preWiden : inventory.GetHeight();
 
                     CorePlugin.Log.LogWarning("Inventory rows: vanilla height measured as "
                         + _base + " because Player.SetInventorySize never told us. On Valheim "
@@ -353,7 +364,18 @@ namespace Ezomic.Core
             // nothing has grown yet.
             _effective = -1;
 
-            _height.SetValue(inventory, _base + LoadSlack);
+            // From a height that actually exists. This read _base + LoadSlack, and _base is
+            // -1 until LearnBase runs - which on a character with no "invrows" key never
+            // happens at all, because Valheim 1.0's Player.OnSpawned only calls
+            // SetInventorySize when that key is already present and otherwise just writes it.
+            // Every character made before 1.0 is in exactly that state on its first login, so
+            // the grid was being set to -1 + 16 and the fallback below then adopted 15 as the
+            // vanilla height. Reported from the live server on 2026-09-10 as "I logged in and
+            // I have a 15 row inventory", which is LoadSlack - 1 and not a coincidence.
+            _preWiden = inventory.GetHeight();
+            var from = _base >= 0 ? _base : _preWiden;
+
+            _height.SetValue(inventory, from + LoadSlack);
         }
 
         /// <summary>

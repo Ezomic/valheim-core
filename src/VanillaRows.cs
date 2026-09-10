@@ -166,6 +166,64 @@ namespace Ezomic.Core
         }
     }
 
+
+    /// <summary>Where vanilla decides whether to assert a height at all.</summary>
+    [HarmonyPatch(typeof(Player), nameof(Player.OnSpawned))]
+    internal static class VanillaRowsSpawn
+    {
+        /// <summary>
+        /// Learn the baseline on the login where vanilla never announces it.
+        ///
+        /// Valheim 1.0.7's OnSpawned is an if/else and only one branch speaks:
+        ///
+        ///     if (TryGetUniqueKeyValue("invrows", out var v) &amp;&amp; int.TryParse(v, out var r))
+        ///         SetInventorySize(r);
+        ///     else
+        ///         AddUniqueKeyValue("invrows", 4.ToString());
+        ///
+        /// The else branch writes the key and never calls SetInventorySize, so the prefix in
+        /// VanillaRowsSize does not fire and LearnBase is never reached. **Every character made
+        /// before 1.0 takes that branch on its first 1.0 login**, which is every player on a
+        /// server that has just updated - not an edge case, the common case, once each.
+        ///
+        /// What that cost: InventoryRows._base stayed -1, the load widening added its sixteen
+        /// rows of working space to it, and the grid came up fifteen tall. The fallback then
+        /// measured the widened grid and adopted fifteen as vanilla's height. Reported as "I
+        /// logged in and I have a 15 row inventory" on 2026-09-10, which is LoadSlack - 1.
+        ///
+        /// Reading the key back in a postfix is correct for both branches rather than only the
+        /// broken one. On the else branch it returns the 4 vanilla just wrote. On the other
+        /// branch VanillaRowsSize.Restore has already put the true base back into that same key,
+        /// so it returns the same number LearnBase was given a moment ago and this is a no-op.
+        /// Taking vanilla's own written value also avoids hardcoding the 4, which is a literal
+        /// in the game's else branch with nothing behind it.
+        /// </summary>
+        [HarmonyPostfix]
+        private static void Learn(Player __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+                if (!ReferenceEquals(__instance, Player.m_localPlayer)) return;
+
+                string raw;
+                if (!__instance.TryGetUniqueKeyValue(VanillaRows.RowsKey, out raw)) return;
+
+                int rows;
+                if (!int.TryParse(raw, out rows)) return;
+                if (rows < 0) return;
+
+                InventoryRows.LearnBase(rows);
+            }
+            catch (System.Exception e)
+            {
+                CorePlugin.Log.LogError("Core could not read the vanilla row count back out of "
+                    + "the character, so this login falls back to measuring the grid. "
+                    + e.Message);
+            }
+        }
+    }
+
     /// <summary>Where vanilla throws out anything below the height it just set.</summary>
     [HarmonyPatch(typeof(Humanoid), nameof(Humanoid.DropInvalidItems))]
     internal static class VanillaRowsDrop
