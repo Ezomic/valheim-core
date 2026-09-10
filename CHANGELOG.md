@@ -3,6 +3,30 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
+## [1.2.1] - 2026-09-10
+
+**1.2.0 shipped the wrong binary. If you have it, replace it.** The package published under
+that number contains the 1.1.0 assembly, built 2026-08-28, so none of the fixes listed below
+under 1.2.0 are in it - including the inventory row protection, which is the one that stops
+items being destroyed. There is no code change between 1.2.0 and 1.2.1; this release exists
+because a Thunderstore version number cannot be reused.
+
+### Fixed
+
+- **The published package now contains the code the version number claims.** `tcli build`
+  assembles a package from `core/package/BepInEx/plugins/Core`, a staging folder that nothing
+  refreshed or checked. It held an August build. Core was the only mod published that way -
+  the other nine went up from `package.ps1` zips, and all nine were verified correct by
+  installing the actual Thunderstore downloads and reading the versions they registered.
+
+  Packaging now refuses to build when a staged assembly's version disagrees with
+  `manifest.json`, so this cannot be published silently again.
+
+  Found by updating the live server to Longhouse 2.0.0 and watching it come up announcing
+  `Registered Core 1.1.0`, alongside the `Ambiguous match for Inventory.Load` that 1.2.0
+  fixed - which is to say the row protection was not merely absent from the package, it was
+  visibly broken on a server the pack had just been installed on.
+
 ## [1.2.0] - 2026-09-09
 
 Rebuilt for Valheim 1.0. This version does not run on pre-1.0 Valheim, and the previous
