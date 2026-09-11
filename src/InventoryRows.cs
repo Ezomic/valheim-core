@@ -581,6 +581,18 @@ namespace Ezomic.Core
                     if (image.sprite.name.IndexOf("woodpanel", System.StringComparison.OrdinalIgnoreCase) < 0) continue;
                     if (image.rectTransform.rect.width < full * 0.6f) continue;
 
+                    // The container window is a CHILD of the player window - the real path is
+                    // Inventory_screen/root/Player/Container - so walking the player's children
+                    // reaches the chest panel's own Bkg and selected_frame, which wear the same
+                    // woodpanel sprite at very nearly the same width. Both filters wave them
+                    // through, and growing them at pivot 0.5 put a row of spare wood above and
+                    // below every chest you opened.
+                    //
+                    // Skipped rather than filtered harder, because there is nothing about the
+                    // sprite or the size that separates them - only where they sit. The
+                    // container is moved by this class, never resized by it.
+                    if (_container != null && image.transform.IsChildOf(_container)) continue;
+
                     Remember(image.rectTransform);
                 }
             }
@@ -591,6 +603,28 @@ namespace Ezomic.Core
 
                 Panels.Add(rect);
                 Heights.Add(rect.rect.height);
+
+                // Named, with its path, because "found by the sprite it draws, then filtered by
+                // width" is a heuristic and the only way to know what it actually caught is to
+                // read the list. It has been wrong once already in the other direction, catching
+                // the armour and weight tabs cut from the same woodpanel art.
+                CorePlugin.Log.LogInfo("Inventory panel: grabbed " + Path(rect)
+                    + "  " + rect.rect.width.ToString("F0") + "x"
+                    + rect.rect.height.ToString("F0")
+                    + "  pivot y " + rect.pivot.y.ToString("F2"));
+            }
+
+            private static string Path(Transform t)
+            {
+                var name = t.name;
+
+                for (var p = t.parent; p != null; p = p.parent)
+                {
+                    name = p.name + "/" + name;
+                    if (p.name == "InventoryGui" || p.parent == null) break;
+                }
+
+                return name;
             }
 
             private static void Resize(InventoryGui gui, int rows)
