@@ -489,6 +489,9 @@ namespace Ezomic.Core
                     return;
                 }
 
+                var player = Player.m_localPlayer;
+                if (player == null) return;
+
                 if (!ReferenceEquals(gui, _seen))
                 {
                     _seen = gui;
@@ -496,20 +499,46 @@ namespace Ezomic.Core
                     Capture(gui);
                 }
 
-                // Extra, not Total. This asked Claims how tall the grid was and Claims does
-                // not know: the tick clamps the height up to what the items occupy, so an
-                // inventory holding something below the claimed rows drew nine rows of slots
-                // over a panel grown by one. The lower rows had no wood behind them at all.
+                // Measured off the grid on screen, not off Extra, and that distinction is the
+                // bug a player reported on 2026-09-11: a row bought from Haldor drew its slots
+                // over open water with no wood behind them.
                 //
-                // It is also what the guard has to compare. On Total the panel only ever
-                // redrew when a mod changed its claim, so a height that moved for any other
-                // reason - a load finding items in a low row, rows given back while still
-                // occupied - left the panel where it was and nothing ever corrected it.
-                var rows = Extra;
+                // Extra counts only what mods claimed above the vanilla baseline, and that
+                // baseline is learned from the `invrows` key - so buying a row moves the
+                // baseline up with it and Extra stays 0. The panel was then set to
+                // captured + 0 and never grew for a row that was really there.
+                //
+                // Vanilla does not size the panel itself. Confirmed by buying a row and
+                // relogging: the slots are still outside the wood, so this is not a stale
+                // capture that a fresh window would correct. Which also means the panel height
+                // captured from a fresh window is always the authored one, whatever the
+                // character has bought - and that is what makes an absolute baseline safe here.
+                //
+                // Asking the inventory how tall it is covers every source at once: rows a mod
+                // claimed, rows the player bought, and the tick's own clamp up to whatever the
+                // items occupy. All three are reasons the wood has to move, and only one of
+                // them was being counted.
+                var rows = Grown(player);
                 if (rows == _shown) return;
 
                 _shown = rows;
                 Resize(gui, rows);
+            }
+
+            /// <summary>
+            /// How many rows taller than the authored panel the grid currently is.
+            ///
+            /// PanelRows is the row count Valheim's own inventory art fits, and it is a
+            /// constant of the artwork rather than of the character - which is exactly why it
+            /// cannot be read from the inventory, the `invrows` key or Core's own baseline.
+            /// All three move when a row is bought; the wood does not.
+            /// </summary>
+            private static int Grown(Player player)
+            {
+                var inventory = player.GetInventory();
+                if (inventory == null) return 0;
+
+                return Mathf.Max(0, inventory.GetHeight() - CorePlugin.PanelRows.Value);
             }
 
             private static void Capture(InventoryGui gui)

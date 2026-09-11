@@ -71,11 +71,25 @@ namespace Ezomic.Core
         /// </summary>
         internal static bool RowsSafe { get; private set; }
 
+        internal static ConfigEntry<int> PanelRows;
+
         private Harmony _harmony;
 
         private void Awake()
         {
             Log = Logger;
+
+            // The row count Valheim's inventory panel art fits, which is a fact about the
+            // artwork and not about the character. It cannot be derived: the inventory height,
+            // the `invrows` key and Core's own learned baseline all move when a row is bought
+            // from the trader, and the wood does not move with them. Configurable rather than
+            // const because it is exactly the sort of number a game update changes, and a
+            // player seeing a row hang outside the panel can correct it without a build.
+            PanelRows = Config.Bind("Inventory", "PanelRows", 4,
+                "How many rows Valheim's own inventory panel artwork is drawn to fit. Core "
+                + "grows the wooden panel by every row beyond this - rows a mod claimed and "
+                + "rows bought from the trader alike. Raise it only if a game update ships a "
+                + "taller panel; lowering it stretches the window for no reason.");
 
             EnforceVersions = Config.Bind("Multiplayer", "EnforceVersions", true,
                 "Refuse a connection when the client and the server disagree about which "
@@ -172,6 +186,13 @@ namespace Ezomic.Core
             Suite.Register(PluginGuid, PluginName, PluginVersion, Config, Requirement.Everyone,
                 typeof(CorePlugin).Assembly);
 
+            // Held back from the host, because it describes the artwork on this machine and
+            // not a rule about the world. Every other typed entry is a server decision by
+            // default - that is the point of the sync - but a server imposing how tall its own
+            // inventory art is would push a wrong number onto a client whose game had shipped
+            // a different panel, which is the one situation this setting exists to rescue.
+            Suite.Local(PanelRows);
+
             if (GateWired && ConfigWired && RowsSafe)
             {
                 Log.LogInfo(PluginName + " " + PluginVersion + " by " + PluginAuthor + " - ready.");
@@ -262,13 +283,20 @@ namespace Ezomic.Core
         /// </summary>
         private void Update()
         {
-            // The guard is here rather than inside Tick because this is the only caller, and
-            // because it has to cover the backdrop too: growing the wooden panel to fit rows
-            // that are not being claimed would leave a stretched, half-empty window.
+            // The backdrop runs whichever side of the guard Core's own rows fall on, and that
+            // is a change from when the guard covered both. It used to be true that growing
+            // the panel without claimed rows would leave a stretched, half-empty window -
+            // because the panel was sized from what mods had claimed. It is sized from the
+            // grid on screen now, so it cannot outrun the slots it is drawn behind.
+            //
+            // Which matters, because the case that sent us here is a row bought from the
+            // trader by a player claiming nothing at all. Leaving the backdrop behind the
+            // guard would have fixed it only for people who also run a mod that claims rows.
+            InventoryRows.Backdrop.Tick();
+
             if (!RowsSafe) return;
 
             InventoryRows.Tick();
-            InventoryRows.Backdrop.Tick();
         }
 
         private void OnDestroy()
