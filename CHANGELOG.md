@@ -3,6 +3,47 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
+## [1.2.3] - 2026-09-11
+
+Reported by a player who bought an inventory row from Haldor and found its slots drawn over
+open water with no wood behind them.
+
+### Fixed
+
+- **A row bought from the trader had no panel behind it.** The backdrop grew the wooden panel
+  by the rows *mods* had claimed above the vanilla baseline, and that baseline is learned from
+  the `invrows` key - so buying a row moved the baseline up with it and the count stayed at
+  zero. Vanilla sizes the panel when the window is built and never resizes one already open,
+  and Core is the only other thing that writes that rect, so nothing corrected it for the rest
+  of the session.
+
+  The panel is now sized from the grid on screen against what the captured art already fits,
+  both measured rather than assumed. That covers all three reasons the wood has to move at
+  once - rows a mod claimed, rows the player bought, and the tick's own clamp up to whatever
+  the items occupy - where only the first was counted.
+
+- **Every chest window was a row of wood too tall, top and bottom.** The container window is a
+  child of the player window, so the search for the backdrop reached the chest panel's own
+  background and frame: same sprite, near enough the same width, and both filters waved them
+  through. Skipped by position now, because nothing about the art separates them.
+
+- **The chest window could end up below the screen.** It is pushed down by what the inventory
+  panel gained, which is right for a row or two and puts it under the taskbar once a character
+  has bought every row a trader sells. It is lifted back on now, overlapping the inventory
+  instead - at that height the two cannot both fit, so the choice is which one is reachable,
+  and it says in the log when it happens.
+
+### Changed
+
+- The backdrop runs whether or not Core's own row claims are safe to apply. It used to sit
+  behind that guard, which was right when the panel was sized from claims; sized from the grid
+  it cannot outrun the slots it is drawn behind. The player who reported this claims no rows at
+  all, so the guard would have kept the fix from the people who need it.
+
+- The panel work says what it measured - which rects it grabbed, what the art fits, how far the
+  container was lifted. Two of the three bugs above were found by reading those numbers after
+  reasoning about the hierarchy had produced a confident wrong answer.
+
 ## [1.2.2] - 2026-09-10
 
 ### Fixed

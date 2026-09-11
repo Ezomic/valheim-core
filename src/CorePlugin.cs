@@ -35,7 +35,7 @@ namespace Ezomic.Core
     {
         public const string PluginGuid = "ezomic.valheim.core";
         public const string PluginName = "Core";
-        public const string PluginVersion = "1.2.2";
+        public const string PluginVersion = "1.2.3";
         public const string PluginAuthor = "Robbin Thijssen";
 
         internal static ManualLogSource Log;
