@@ -518,7 +518,7 @@ namespace Ezomic.Core
                 // claimed, rows the player bought, and the tick's own clamp up to whatever the
                 // items occupy. All three are reasons the wood has to move, and only one of
                 // them was being counted.
-                var rows = Grown(player);
+                var rows = Grown(gui, player);
                 if (rows == _shown) return;
 
                 _shown = rows;
@@ -526,19 +526,37 @@ namespace Ezomic.Core
             }
 
             /// <summary>
-            /// How many rows taller than the authored panel the grid currently is.
+            /// How many rows taller than the captured panel the grid currently is.
             ///
-            /// PanelRows is the row count Valheim's own inventory art fits, and it is a
-            /// constant of the artwork rather than of the character - which is exactly why it
-            /// cannot be read from the inventory, the `invrows` key or Core's own baseline.
-            /// All three move when a row is bought; the wood does not.
+            /// Measured, not configured, and the measurement is the whole correction. A
+            /// constant was tried first - "the art fits four rows" - and it was wrong: the
+            /// panel captured on a character who had bought a row came back 358px against a
+            /// 70px row, which is five. Vanilla does size its own panel when the window is
+            /// built; it just never resizes one that is already open.
+            ///
+            /// So the baseline is whatever the capture actually covers, and it cannot drift:
+            /// Capture only runs on a window Core has not written to yet.
+            ///
+            /// That makes both cases fall out of one rule. A window built after the purchase
+            /// is captured at five rows and needs nothing. A window built before it is
+            /// captured at four, and the row bought mid-session puts the grid one past the
+            /// capture - which is exactly the reported bug, where the panel stayed four rows
+            /// for the rest of the session because Extra never moved off zero.
             /// </summary>
-            private static int Grown(Player player)
+            private static int Grown(InventoryGui gui, Player player)
             {
                 var inventory = player.GetInventory();
-                if (inventory == null) return 0;
+                if (inventory == null || Heights.Count == 0) return 0;
 
-                return Mathf.Max(0, inventory.GetHeight() - CorePlugin.PanelRows.Value);
+                var grid = gui.m_player.GetComponentInChildren<InventoryGrid>(true);
+                if (grid == null || grid.m_elementSpace <= 0f) return 0;
+
+                // Rounded rather than floored, because the art carries a little padding past
+                // its last row - 358px of panel over 70px rows is five rows and change, not
+                // five and a spare row's worth.
+                var fits = Mathf.RoundToInt(Heights[0] / grid.m_elementSpace);
+
+                return Mathf.Max(0, inventory.GetHeight() - fits);
             }
 
             private static void Capture(InventoryGui gui)
@@ -590,6 +608,17 @@ namespace Ezomic.Core
 
                     Panels[i].SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, Heights[i] + added);
                 }
+
+                // Says what it measured, not just what it did. This line is what caught the
+                // constant that came before it: 358px of captured panel over 70px rows is five
+                // rows, not the four the code was asserting.
+                if (Panels.Count > 0)
+                    CorePlugin.Log.LogInfo("Inventory panel: captured " + Heights[0].ToString("F0")
+                        + "px, one row is " + grid.m_elementSpace.ToString("F0")
+                        + "px, so the captured art fits about "
+                        + Mathf.RoundToInt(Heights[0] / grid.m_elementSpace)
+                        + " rows; growing by " + rows + " row(s) to " + (Heights[0] + added).ToString("F0")
+                        + "px for a grid " + rows + " row(s) past what the capture covers.");
 
                 // Pushed down by exactly what the inventory gained, from its own captured
                 // baseline rather than by nudging it each time, so opening a chest twice does
