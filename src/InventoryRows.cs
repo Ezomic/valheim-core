@@ -623,8 +623,46 @@ namespace Ezomic.Core
                 // Pushed down by exactly what the inventory gained, from its own captured
                 // baseline rather than by nudging it each time, so opening a chest twice does
                 // not walk it off the screen.
-                if (_container != null)
-                    _container.anchoredPosition = _containerBase + new Vector2(0f, -added);
+                if (_container == null) return;
+
+                _container.anchoredPosition = _containerBase + new Vector2(0f, -added);
+
+                // And then clamped, because "exactly what the inventory gained" stops being
+                // affordable. Vanilla stacks the container below the player window with a gap,
+                // and preserving that gap is right for a row or two; with every row a character
+                // can buy plus what a mod claims, the panel grows by enough to put the whole
+                // chest window under the taskbar. Seen at eight rows on a 1080-tall screen,
+                // where the two windows cannot both fit however the gap is spent.
+                //
+                // So overlap is chosen over disappearance. A container sitting over the last
+                // rows of the inventory is awkward and completely usable; one below the screen
+                // is neither. Nothing about this is reachable by pushing less - at that height
+                // there is no offset that fits both.
+                //
+                // Measured off world corners rather than computed from anchors and pivots,
+                // which is the same reason Rist's bar reads its own geometry: the arithmetic
+                // has to be right about a parent chain nobody here authored, and the corners
+                // are already the answer.
+                var canvas = _container.GetComponentInParent<Canvas>();
+                if (canvas == null) return;
+
+                var canvasRect = canvas.transform as RectTransform;
+                if (canvasRect == null || canvas.scaleFactor <= 0f) return;
+
+                var box = new Vector3[4];
+                var screen = new Vector3[4];
+                _container.GetWorldCorners(box);
+                canvasRect.GetWorldCorners(screen);
+
+                // Corner 0 is bottom-left on both, so a positive difference is overhang.
+                var below = screen[0].y - box[0].y;
+                if (below <= 0f) return;
+
+                _container.anchoredPosition += new Vector2(0f, below / canvas.scaleFactor);
+
+                CorePlugin.Log.LogInfo("Inventory panel: the container window would have hung "
+                    + below.ToString("F0") + "px below the screen, so it was lifted back on. "
+                    + "It now overlaps the inventory - there is no room for both at this height.");
             }
         }
     }
