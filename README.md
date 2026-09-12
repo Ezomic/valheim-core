@@ -1,42 +1,120 @@
-# Core
+# Longhouse Core
 
-Shared plumbing for the Ezomic mods. You do not install this on purpose; every mod in the
-suite depends on it, and your mod manager fetches it for you.
+Shared library for the Ezomic Valheim mods. It handles the parts that only make sense once,
+per machine rather than per mod: checking that a client and a server are running the same
+mods, applying the host's settings while you are connected, and arbitrating extra player
+inventory rows between mods that each want some.
 
-Built against the installed game (1.0.7, Unity 6000.0.75, BepInEx 5.4.23.5, Harmony 2.9).
-Single DLL, no assets.
+You normally get it as part of [the Longhouse pack](https://thunderstore.io/c/valheim/p/Ezomic/Longhouse/).
+It is a single DLL with no assets, built against Valheim 1.0.7, Unity 6000.0.75, BepInEx
+5.4.23.5 and Harmony 2.9.
 
-## What it does
+## Features
 
-Three things. Two are about multiplayer, and one is about two mods wanting the same field.
+- **Version check.** Each Ezomic mod registers its guid, version and build id. When a client
+  connects, both ends exchange that list, and the server rejects a client whose list does not
+  match. The reason is written to both logs and appended to the client's "Incompatible
+  version" screen, which otherwise says nothing useful.
+- **Host config.** The server sends its settings for every registered mod, and the client
+  uses them for as long as it is connected. Nothing is written to the client's config file,
+  and the client's own values come back on disconnect.
+- **Shared inventory height.** Mods claim a number of extra player inventory rows instead of
+  writing `Inventory.m_height` themselves. Core sums the claims and writes the field once, so
+  two mods that both want rows get both, and it protects the contents of those rows during
+  loads.
 
-**It refuses a connection that would break.** If the server has Yoke 1.2.0 and you have
-1.1.0, you are turned away at the door instead of playing for an hour into stacks that only
-exist on one machine. Your log says exactly which mod and which versions, because the
-game's own rejection screen has no room for it.
+All three can be turned off in the config file.
 
-**It makes the host's settings the ones that count.** A guest keeps their own config file
-(nothing is written, nothing is overwritten) but while they are on your world they play by
-your numbers, and they get their own back the moment they disconnect.
+This repository also carries `shared/Prefabs.cs` and `shared/BiomeIndex.cs`, which are source
+files mods link into their own projects. They are not part of the DLL. See
+[For mod authors](#for-mod-authors).
 
-**It owns the player inventory's height.** Two mods that both want extra rows cannot each
-write the same private int, so instead they each state a number and Core adds them up and
-writes once.
+## Installation
 
-All three are off-switchable. None of them is on by accident.
+Install [BepInEx 5.4.2350](https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/)
+first. These mods use the BepInEx 5 API and will not load on BepInEx 6.
 
-This repo also carries `shared\Prefabs.cs`, which is **not** in the DLL - see below.
+A mod manager handles it if you install the Longhouse pack, which pins Core along with every
+other member. To install it on its own, drop `EzomicCore.dll` in
+`BepInEx\plugins\Core\`.
 
-## Why it exists
+Install it on the dedicated server as well as on clients. The server is the only side that
+can actually refuse a connection, so a server without Core does not check anything, whatever
+its clients are running.
 
-Every mod in the suite needed the same handshake. A copy of it per mod would be one chance
-per mod to get the ordering wrong, and worse, one RPC per mod racing the others on the same
-connection. Registering once and letting the mods declare *what* they want rather than *how*
-it happens is the whole argument for this being a package rather than a file copied around.
+Core is an optional soft dependency for the individual mods. Each one checks whether Core is
+loaded and, if it is not, logs a line saying it is running standalone and carries on without
+the version check and the host config. The exception is Delve, which requires it outright.
 
-## Wiring a mod into it
+## Configuration
 
-Three lines, in `Awake`, after config is bound:
+`BepInEx\config\ezomic.valheim.core.cfg`, all under a `Multiplayer` section.
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `EnforceVersions` | `true` | Refuse a connection when the two ends disagree about which Ezomic mods are installed or about their versions. Turning it off does not make a mismatch safe, it makes it silent |
+| `EnforceBuilds` | `true` | Also refuse when both ends claim the same version but were built from different source. Turn this off if you build the mods yourself on more than one machine: the build id depends on source paths, so the same commit in a different folder produces a different id |
+| `EnforceConfig` | `true` | Apply the host's settings while connected. On a server this decides whether it sends them, on a client whether it accepts them |
+
+## Multiplayer
+
+The mod list goes out in `ZNet.OnNewConnection`, before either side sends `PeerInfo`, so it
+has arrived by the time the check runs. Every disagreement is reported at once rather than
+one per reconnect attempt.
+
+What gets compared, per registered mod: the version string, then the build id (the assembly's
+module version id, which the compiler derives from the compilation inputs), then a hash of the
+mod's data file if it declared one. A missing build id or data hash from an older Core on the
+far end is treated as unknown, not as a mismatch.
+
+A mod registers as `Everyone` or `HostOnly`. `Everyone` means both ends need it at the same
+version. `HostOnly` means clients without it are let in, but a client that does have it is
+still checked against the host, in both directions. Skaft is `HostOnly`, for example: it is
+client-side hammer repair and the server neither gains nor loses by a client having it.
+
+The client checks too, but only to write a readable log and put the detail on the refusal
+screen. There is one place a connection is actually closed, and it is on the server.
+
+**Config sync.** Registering a mod syncs its whole config file, minus keybinds and minus
+anything the mod held back with `Suite.Local`. Values are swapped in memory on the client, the
+originals are kept, and they are restored when `ZNet.Shutdown` runs, which covers quitting to
+the menu, being kicked and the connection dropping. If ConfigurationManager is installed, an
+imposed entry is greyed out, and editing one anyway puts the host's value straight back.
+
+Keybinds (`KeyCode` and `KeyboardShortcut` entries) are never imposed on a client unless the
+mod that owns them calls `Suite.Sync` on them explicitly.
+
+A client can set `EnforceConfig = false` and keep its own settings. The version check is what
+the server enforces; the config sync is cooperative.
+
+## Inventory rows
+
+Valheim 1.0 has its own inventory row feature, and it evicts anything below the row count it
+believes in. Core works with that rather than against it.
+
+- The grid is capped at **9 rows**. That is vanilla's clamp in `Player.SetInventorySize` and
+  there is no way past it.
+- **Rows bought from the trader win.** A character that has bought rows arrives with a higher
+  baseline, and mod claims get whatever is left up to 9. When claims are truncated, Core logs
+  a warning naming the numbers. Nothing is dropped.
+- The character's `invrows` key is written back to vanilla's own count, not the inflated one,
+  so it does not compound across logins and so uninstalling Core leaves a normal character.
+  Vanilla will then drop whatever was in the extra rows on the ground, which is the honest
+  outcome for rows nothing is providing any more.
+- Any inventory is widened while it is being read from disk and trimmed back afterwards, never
+  below what the items occupy. Without this, an item saved in a row below the grid it loads
+  into is silently destroyed. That applies to graves as well as to the player, which is why it
+  covers every container rather than only the player's.
+- The wooden panel behind the inventory grid is resized to match, measured against the grid on
+  screen so it covers rows from any source. The container window is pushed down, and lifted
+  back on screen if it would fall below it, overlapping the inventory instead.
+
+If the row patches do not all apply, Core does not drive rows at all and logs an error. Rows
+claimed without the load protection is the one combination that destroys items.
+
+## For mod authors
+
+Register from `Awake`, after binding config:
 
 ```csharp
 private void Awake()
@@ -44,189 +122,119 @@ private void Awake()
     YokeConfig.Bind(Config);
 
     Suite.Register(PluginGuid, PluginName, PluginVersion, Config);
-    Suite.Sync(YokeConfig.StackMultiplier, YokeConfig.StackCap);
 }
 ```
 
-`Register` puts the mod on the version gate. `Sync` marks the entries the host decides. A
-mod that calls neither still runs and just gets none of this, so the suite can be wired one
-mod at a time.
+`Suite.Register(guid, name, version, config, requirement = Requirement.Everyone, owner = null)`
+puts the mod on the version check and absorbs its config for syncing. `Requirement.HostOnly`
+is the other option; use `Everyone` for anything that registers a prefab or changes item data,
+because a client that cannot resolve a prefab hash discards the ZDO rather than erroring.
 
-Core is a **soft** dependency, and it is worth keeping it one. Every mod here checks
-`Chainloader.PluginInfos` for Core's guid and calls into it from a separate method marked
-`MethodImplOptions.NoInlining`. The JIT resolves the assemblies a method needs when it first
-compiles that method, so a `Suite` call sitting directly in `Awake` drags this assembly in
-before the check can prevent it, and the missing-assembly exception lands during plugin
-load. Done properly, a mod runs standalone and says in the log what it is doing without.
+The rest of the API:
 
-### Requirement
+- `Suite.Sync(entry, ...)` forces an entry into the synced set. Rarely needed, since
+  registering syncs everything already, except to insist that a keybind really must match.
+- `Suite.Local(entry, ...)` keeps an entry out of the host's hands: UI scale, colours, hover
+  text, preferred units, anything a mismatch cannot desync.
+- `Suite.Data(contents, guid = null)` folds a data file into the version check, for a mod that
+  is a DLL plus a text file that decides what it does. It hashes the contents with line
+  endings normalised, so a CRLF difference is not a mismatch.
+- `Suite.ExplainRefusal(reason)` sets the text appended to the next connection-failure screen.
+  Call it just before dropping someone.
+- `Suite.Display(order, advanced, name)` returns a ConfigurationManager attributes object for
+  a `ConfigDescription` tag, so the in-game settings window is ordered rather than
+  alphabetical.
+- `InventoryRows.Claim(PluginGuid, 3)` asks for three extra player rows, replacing whatever
+  that guid asked for before. `Claim(PluginGuid, 0)` gives them back. Cheap to call every
+  frame. `InventoryRows.Total` is what everyone claimed; `InventoryRows.Extra` is how much
+  taller the grid actually is, which can be more.
 
-```csharp
-Suite.Register(PluginGuid, PluginName, PluginVersion, Config, Requirement.HostOnly);
-```
+Keep Core a soft dependency. Check `Chainloader.PluginInfos` for `ezomic.valheim.core` and put
+the `Suite` call in a separate method marked `[MethodImpl(MethodImplOptions.NoInlining)]`. The
+JIT resolves the assemblies a method needs when it first compiles that method, so a `Suite`
+call sitting directly in `Awake` pulls in the assembly before the check can prevent it, and the
+missing-assembly exception lands during plugin load.
 
-`Everyone` is the default and the safe answer. Anything that registers a prefab or changes
-item data is `Everyone` whether it looks like it or not: a client that cannot resolve a
-prefab hash discards the ZDO as junk rather than failing loudly, so the symptom of getting
-this wrong is a creature that silently does not exist for one player.
+### Shared source
 
-`HostOnly` says clients without the mod are welcome. They are still checked if they *do*
-have it, because a half-updated group is the case that actually happens and it fails in
-stranger ways than nobody having it.
-
-### What to sync, and what not to
-
-Registering a mod syncs its whole config file. That is the default because the opt-in version
-had two entries opting in across thirteen mods, and a setting that changes the world has to
-match on both ends or the two disagree silently.
-
-Two things come out of it. **Keybinds are never synced**, because nothing about which key
-opens a window can desync a world and taking someone's keys away for the evening is the kind
-of sync that gets a mod uninstalled. Core knows a keybind by its type, which is the only
-honest signal it has about a mod it knows nothing about.
-
-Everything else a player would resent losing is the mod's own call:
-
-```csharp
-Suite.Local(TetherConfig.HoverText, TetherConfig.UiScale);
-```
-
-A UI scale, a colour, a hover-text toggle, a preferred unit. If a mismatch cannot desync
-anything, it belongs here.
-
-The reverse also exists, for the strange case where a key really does have to match:
-
-```csharp
-Suite.Sync(StowConfig.KeyStow);   // overrides the keybind exception
-```
-
-### Data files
-
-```csharp
-Suite.Data(File.ReadAllText(path));
-```
-
-A mod that reads a text file beside its DLL is not fully described by its version. Two ends
-can run the same build and disagree about what is in that file, and the gate would pass it.
-`Data` folds the contents into the same comparison. A mod that never calls it is compared as
-unknown rather than as a mismatch, so an older Core on the far end costs the check and
-nothing else.
-
-### Extra inventory rows
-
-```csharp
-InventoryRows.Claim(PluginGuid, 3);   // three rows, mine
-InventoryRows.Claim(PluginGuid, 0);   // give them back
-```
-
-State a number, not a height. Core sums the claims, captures the vanilla height per player
-rather than adding to it, and writes the field itself.
-
-## Config
-
-`BepInEx\config\ezomic.valheim.core.cfg`
-
-| Key | Default | What it does |
-| --- | --- | --- |
-| `EnforceVersions` | `true` | Refuse a connection when the two ends disagree. Off does not make a mismatch safe; it makes it silent |
-| `EnforceBuilds` | `true` | Also refuse when both ends claim the same version and are different builds. Turn it off if you build the mods yourself on more than one machine, since the same commit in a different folder produces a different id |
-| `EnforceConfig` | `true` | The host's synced settings win while you are connected |
-
-## Shared source, which is not part of this plugin
-
-`shared\Prefabs.cs` lives in this repo and is excluded from this DLL. Mods link it:
+`shared/Prefabs.cs` and `shared/BiomeIndex.cs` live in this repository and are excluded from
+the DLL. Mods link them:
 
 ```xml
 <Compile Include="..\core\shared\Prefabs.cs" Link="shared\Prefabs.cs" />
+<Compile Include="..\core\shared\BiomeIndex.cs" Link="shared\BiomeIndex.cs" />
 ```
 
-It is the runtime prefab registry every mod that invents a piece, an item or a creature
-needs: `Prefabs.Keep(name, build, item, buildTool)` builds once and re-registers into every
-world from the mod's own update - both of ZNetScene's lookups, ObjectDB when it is an item, a
-tool's build menu when it is a piece - checking the live scene each time rather than a flag.
-The steps are available separately as `Known`, `Holder`, `Clone`, `Donor`, `Register`,
-`RegisterItem`, `ToolPieces`, `InTool` and `AddToTool`.
+They are source rather than classes in the DLL because a mod that cannot register its prefab
+or classify an item does not degrade, it does nothing, and putting them in Core would make
+Core mandatory for every mod that uses them. A runtime fallback would mean a second code path
+that only runs where nobody tests.
 
-**Why source and not a class in here.** Core is a soft dependency by design: a mod without it
-loses the version gate and the host's settings and otherwise works. Registration is not like
-that - a mod that could not register its prefab would load, patch nothing into the world and
-look broken - so putting it in this DLL would have made Core mandatory for five mods to do
-anything at all. A runtime fallback would have kept both properties and cost two code paths,
-the second of which only ever runs where nobody tests. One shared file is one code path.
+**`Prefabs`** is the runtime prefab registry. `Prefabs.Keep(name, build, item, buildTool)`
+plus `Prefabs.Tick()` from the plugin's `Update` builds the prefab once and re-registers it
+into every world: both of ZNetScene's lookups, ObjectDB when it is an item, and a tool's
+build menu when it is a piece. It checks the live scene each time rather than a flag, which
+matters because ZNetScene and ObjectDB are rebuilt on every world load, including a trip to
+the menu and back. A registry that answers "already done?" from a static bool early-returns
+into a scene that has never heard of the prefab, and every ZDO of that prefab is then
+discarded with nothing written to any log. The steps are also available individually:
+`Known`, `Holder`, `Clone`, `Donor`, `Register`, `RegisterItem`, `ToolPieces`, `InTool`,
+`AddToTool`, and `Drop` to stop keeping one. Set `Prefabs.Log` to the plugin's own logger.
 
-The failure it exists to prevent is worth stating plainly, because it is silent: ZNetScene
-and ObjectDB are rebuilt on every world load, including a trip to the menu and back, so a mod
-that answers "registered yet?" from a static bool says yes to a scene that has never heard of
-the prefab, registration early-returns, and every ZDO of that prefab is discarded as junk
-with nothing written to any log. A built piece was lost to it on 2026-08-16.
+**`BiomeIndex`** answers which biome an item comes from, derived from the game's own tables:
+`ZoneSystem.m_vegetation`, the spawn lists and their CharacterDrops, smelter and cooking
+recipes, plus a small override string for the handful none of those reach (iron scrap, for
+one, which only exists inside Sunken Crypts). Earliest biome wins. `BiomeIndex.BiomeOf(name)`
+is the lookup; `BiomeForKey` and `Overrides` are the delegates the host mod fills in. Yoke and
+Hirsla link it.
 
-## Design notes
+Fixing either file means rebuilding every mod that links it.
 
-**The handshake goes out in `OnNewConnection`**, which happens on both ends before either
-sends `PeerInfo`. ZRpc delivers in order on one connection, so by the time the gate runs in
-`RPC_PeerInfo` the other end's mod list has already arrived. Sending it any later means
-gating on data that is not there yet, and the symptom is a gate that lets the first
-connection through and works ever after.
+## Troubleshooting
 
-**Only the server refuses.** The client compares too, but only to write a readable log.
-There is exactly one place a connection dies, and it is `rpc.Invoke("Error",
-ConnectionStatus.ErrorVersion)` on the server.
+**A mod's log line says `** NOT ENFORCED, Core's version gate failed to apply **`.** One of
+Core's patch groups did not apply, usually after a game update. Core logs `came up DEGRADED`
+with the list of what is missing instead of its normal `ready.` line. Read the errors above it.
 
-**Every disagreement is reported at once.** Fixing them one reconnect at a time is how a
-five-mod mismatch becomes an evening.
+**Clients are refused with "different build".** Both ends have the same version number but
+different binaries. Rebuild whichever is behind, or set `EnforceBuilds = false` if you build
+from source in more than one working folder.
 
-**Builds are compared, not just version strings.** A version string is whatever was last
-remembered to be edited, and during development every build carries the same number, so a
-client three commits ahead of the server matches perfectly and connects. That is the
-mismatch that actually happens, and a version check is the least able to see it.
+**A mod in the plugins folder is not being checked.** The version check only sees mods that
+call `Suite.Register`. Anything else, including third-party mods, is invisible to it.
 
-**Synced values are swapped in memory, never written to disk.** That is the reason this is
-more code than rewriting the client's config file would be. A player who joins a server with
-doubled stacks must not find their own single-player world quietly changed the next evening.
+**Settings on a client are not following the server.** Check `EnforceConfig` on both ends, and
+check that the mod in question registers with Core at all. Keybinds are excluded by design.
 
-**A local edit while the host is deciding gets put straight back**, via the config file's
-own `SettingChanged`. Without that, the in-game config window happily lets someone drag a
-slider that has no effect, and the mod looks broken rather than governed. Where a mod passed
-a display tag, the entry also greys out.
+## Bug reports
 
-**Version strings come from `PluginVersion`, not the assembly.** It is the constant the
-packaging script cross-checks against the manifest, so what the gate compares is what people
-actually installed.
+[The Discord](https://discord.gg/hJzAVaZ5wb) is the fastest route, and the right one if you
+are not sure whether what you are seeing is a bug. Issues on
+[the repository](https://github.com/Ezomic/valheim-core) work too and suit anything long.
 
-**The inventory height is written as a field, not patched as an accessor.** Patching
-`Inventory.GetHeight()` would have been tidier and is wrong: the UI reads the accessor, but
-`ValidPos`, `FindEmptySlot`, `HaveEmptySlot`, `NrOfFreeStacks`, `AddItem`'s bounds check and
-`Load` all read the field directly. A postfix on the accessor draws rows the inventory
-itself does not believe in, and items cannot be put in them.
+Attach `BepInEx\LogOutput.log`, and say whether you were on a dedicated server, hosting, or in
+single player. For a connection that was refused, the log from both ends is worth far more
+than either alone. If a vanilla mechanic broke rather than a mod feature, check
+`AppData\LocalLow\IronGate\Valheim\Player.log` as well: exceptions thrown mid-frame land there
+and not in the BepInEx log.
 
-**The grid is opened wide before a character loads and trimmed back afterwards.** Rows are
-applied from an update, which cannot run until the player exists, and that is after the
-load. `Inventory.AddItem` drops any stack whose saved position is outside the current grid,
-with no log and no error, and the next save then writes the inventory back without it. So
-the bottom row was destroyed on every relog, for any item, from any mod. The trim never goes
-below the rows the items themselves occupy.
+## Discord
 
-## Limits
+[discord.gg/hJzAVaZ5wb](https://discord.gg/hJzAVaZ5wb) is where mod information, updates,
+support, bug reports and compatibility questions go.
 
-The gate only sees mods that call `Suite.Register`. A mod in the profile that does not is
-invisible to it. That is by design, and it means the gate answers for this suite rather than
-for the whole plugin folder.
+## Server
 
-## Reporting bugs
+There is also a small EU server running the pack if you want somewhere to play: hard combat
+difficulty, resources at 1x, everything else vanilla. Connection details are in the Discord.
 
-[The Discord](https://discord.gg/hJzAVaZ5wb) is the fastest route, and the right one if
-you are not sure whether what you are seeing is a bug at all. Issues on
-[the repo](https://github.com/Ezomic/valheim-core) work too and suit anything long.
+## Licence
 
-Bring `BepInEx\LogOutput.log` if you can, and say whether you were on a server or your
-own world. The log is most of the difference between a fix and a guess, and it is written
-every session whether or not anything went wrong.
+MIT. Robbin Thijssen, Thijssen Software. See [LICENSE](LICENSE), and
+[CHANGELOG.md](CHANGELOG.md) for what shipped when.
 
-## Part of the Longhouse pack
+## Part of Longhouse
 
-This is one of [the Longhouse pack](https://thunderstore.io/c/valheim/p/Ezomic/Longhouse/),
-a pinned set of my mods that installs in one click and is what the Longhouse server runs. You
-do not need the pack to use this on its own, and nothing here behaves differently outside it.
-
-[The Discord](https://discord.gg/hJzAVaZ5wb) is where the server lives if you want to play on
-it: small, EU, hard combat difficulty and everything else vanilla.
+Core is a member of [the Longhouse pack](https://thunderstore.io/c/valheim/p/Ezomic/Longhouse/),
+which pins one set of versions that a server will accept. You do not need the pack to use
+Core, and it behaves the same on its own.
