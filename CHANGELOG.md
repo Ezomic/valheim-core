@@ -3,6 +3,15 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
+## [1.2.4] - 2026-09-12
+
+### Changed
+
+- Rewritten README. Same mod, clearer documentation: what it does and how to install it come
+  first, then configuration, multiplayer behaviour, compatibility and troubleshooting. Every
+  config table was checked against the plugin's own Config.Bind calls, so the settings,
+  sections and defaults listed are the ones actually bound. No code changed in this release.
+
 ## [1.2.3] - 2026-09-11
 
 Reported by a player who bought an inventory row from Haldor and found its slots drawn over
