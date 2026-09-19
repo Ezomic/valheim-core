@@ -23,7 +23,12 @@ It is a single DLL with no assets, built against Valheim 1.0.7, Unity 6000.0.75,
   two mods that both want rows get both, and it protects the contents of those rows during
   loads.
 
-All three can be turned off in the config file.
+- **Server chat lines.** A server can put a line in each player's chat window, under a name
+  of its own choosing. Vanilla cannot: its chat message names a connected player, and a
+  server is not one. Crier uses it for chat written on the Longhouse site.
+
+The first three can be turned off in the config file. The chat line has nothing to turn off:
+nothing sends it but a server running Crier.
 
 This repository also carries `shared/Prefabs.cs` and `shared/BiomeIndex.cs`, which are source
 files mods link into their own projects. They are not part of the DLL. See

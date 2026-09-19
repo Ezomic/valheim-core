@@ -3,6 +3,19 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **Server chat lines.** A server can now put a line in each player's chat window, under a
+  name it picks, the way a player's message appears. Vanilla has no way to do that: its chat
+  message is drawn under the name of the connected player it came from, and a server is not a
+  player, so every attempt is dropped with an error on the client. The window's own
+  plain-title overload has no network path, so the client half has to be a mod every player
+  has, which is Core. Crier uses it to show chat written on the Longhouse site in the chat
+  window instead of the corner where the game puts notices. `<` and `>` in the line become
+  spaces on arrival, as vanilla does to every chat line. An older Core ignores the call.
+
 ## [1.2.4] - 2026-09-12
 
 ### Changed

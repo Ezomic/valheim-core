@@ -38,6 +38,9 @@
     <!-- ZPackage.Write has Vector2i/Vector2s overloads, so every Write needs this even
          though nothing here writes a vector. -->
     <Reference Include="assembly_utils"><HintPath>$(ManagedDir)\assembly_utils.dll</HintPath><Private>false</Private></Reference>
+    <!-- Only so the compiler can choose between Terminal.AddString's overloads: one takes a
+         PlatformUserID, which lives here, and ServerChat calls the one that takes a string. -->
+    <Reference Include="Splatform"><HintPath>$(ManagedDir)\Splatform.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine"><HintPath>$(ManagedDir)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
     <!-- The inventory backdrop is Unity UI: that window is Images inside a Canvas. -->

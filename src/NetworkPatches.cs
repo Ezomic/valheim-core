@@ -56,6 +56,7 @@ namespace Ezomic.Core
         {
             peer.m_rpc.Register<ZPackage>(RpcManifest, ReceiveManifest);
             peer.m_rpc.Register<ZPackage>(RpcConfig, ConfigSync.ReceiveConfig);
+            peer.m_rpc.Register<string, string>(ServerChat.Rpc, ServerChat.Receive);
 
             peer.m_rpc.Invoke(RpcManifest, BuildManifest());
         }
