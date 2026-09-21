@@ -3,6 +3,28 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **A mod can declare the prefabs it puts into the world**, through `Suite.Owns`, and anything
+  can read them back with `Suite.OwnedPrefabs`. This is the one fact about a mod that nothing in
+  the game can answer: ZNetScene holds a name and a GameObject, ObjectDB the same for items and
+  ZoneSystem the same for locations, and not one of them has ever recorded who added it. The
+  consequence is worse than it sounds - a mod that failed to register looks exactly like a mod
+  whose piece you have not found yet, and the two want opposite reactions.
+
+  Nothing has to be written to get this. `Prefabs.Keep` in the shared registrar declares every
+  name it is handed, so the mods using it carry the list without a line of their own; the call
+  is soft in the usual way and a mod running without Core loses the declaration and nothing else.
+
+  Attribution is by the calling assembly's build fingerprint rather than by a guid argument,
+  which is what lets the shared registrar make the call - it is compiled into each mod, so the
+  caller is the mod and there is no guid in scope to pass. Declarations arriving before the mod
+  registers are held and drained at registration, because whether `Keep` runs above or below the
+  `Suite.Register` line is an accident of how each plugin was written, and dropping the early
+  ones would have made this work in four mods and silently not in the fifth.
+
 ## [1.3.0] - 2026-09-21
 
 ### Added

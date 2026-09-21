@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
@@ -150,6 +151,8 @@ namespace Ezomic.Shared
             }
 
             Standing.Add(new Kept { Name = name, Build = build, Item = item, Tool = buildTool });
+
+            Declare(name);
             Log.LogInfo("Keeping " + name + " registered.");
         }
 
@@ -468,6 +471,45 @@ namespace Ezomic.Shared
         // an update.
         private static AccessTools.FieldRef<ZNetScene, Dictionary<int, GameObject>> _named;
         private static MethodInfo _updateRegisters;
+
+        /// <summary>
+        /// Tell Core, if Core is here, that this mod owns a prefab name.
+        ///
+        /// Nothing in the game records which mod registered a prefab, so a tool that wants to
+        /// ask has to be told - and the mods using this registrar are exactly the ones with an
+        /// answer to give, so they may as well give it without a line of their own.
+        ///
+        /// Soft in the way everything about Core is soft here. The Chainloader check runs in
+        /// THIS method and the call sits in another one marked NoInlining, because the JIT
+        /// resolves the assemblies a method needs when it first compiles that method: a Suite
+        /// call in the same body as the guard would drag EzomicCore in before the guard could
+        /// prevent it, and a mod running without Core would fail to load rather than quietly
+        /// skipping this. Same arrangement as every plugin's RegisterWithCore.
+        ///
+        /// It never throws, and a failure costs the declaration and nothing else. Registering
+        /// the prefab is the job; telling anyone about it is a courtesy.
+        /// </summary>
+        private static void Declare(string name)
+        {
+            try
+            {
+                if (!BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey("ezomic.valheim.core"))
+                    return;
+
+                Tell(name);
+            }
+            catch (Exception)
+            {
+                // An older Core without Suite.Owns lands here as a MissingMethodException.
+                // That is a Core worth updating rather than a mod worth breaking.
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void Tell(string name)
+        {
+            Ezomic.Core.Suite.Owns(name);
+        }
 
         private static Dictionary<int, GameObject> NamedPrefabs(ZNetScene scene)
         {

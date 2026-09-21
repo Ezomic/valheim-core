@@ -326,6 +326,20 @@ namespace Ezomic.Core
         /// </summary>
         internal string Data;
 
+        /// <summary>
+        /// Prefab names this mod registers into the world, in the order it declared them.
+        ///
+        /// Nothing in the game can answer this. ZNetScene holds a name and a GameObject and has
+        /// never known who added it, ObjectDB the same for items, and ZoneSystem the same for
+        /// locations - so "what did this mod put in the world" has no answer at all unless the
+        /// mod says. It matters more than it sounds: a mod that failed to register looks exactly
+        /// like a mod whose prefab you have not found yet, and the two want opposite reactions.
+        ///
+        /// Declared rather than derived, and filled in by Prefabs.Keep for the mods that use the
+        /// shared registrar, so most of them carry it without a line of their own.
+        /// </summary>
+        internal readonly List<string> Prefabs = new List<string>();
+
         /// <summary>Entries the host dictates, keyed by "section.key" as sent on the wire.</summary>
         /// <summary>
         /// The entries of this mod's config the host decides, filled in at registration.

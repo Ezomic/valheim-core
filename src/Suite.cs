@@ -32,6 +32,18 @@ namespace Ezomic.Core
         private static string _lastRegistered;
 
         /// <summary>
+        /// Prefab names declared before their mod registered, keyed by build fingerprint.
+        ///
+        /// The order is not something a mod should have to think about, and it is genuinely not
+        /// obvious: the shared registrar is usually called from Awake, and whether that happens
+        /// above or below the Suite.Register line is an accident of how each plugin was written.
+        /// Dropping the early ones would have made this feature work in four mods and silently
+        /// not in the fifth, which is the worst kind of half-working.
+        /// </summary>
+        private static readonly Dictionary<string, List<string>> Early =
+            new Dictionary<string, List<string>>(StringComparer.Ordinal);
+
+        /// <summary>
         /// Declare a mod to the gate.
         ///
         /// Call it after binding config, because <see cref="Sync"/> needs entries that
@@ -73,6 +85,17 @@ namespace Ezomic.Core
             entry.Config = config;
             entry.Fingerprint = FingerprintOf(owner ?? Assembly.GetCallingAssembly());
 
+            // Anything this assembly declared before it got here.
+            List<string> early;
+            if (!string.IsNullOrEmpty(entry.Fingerprint)
+                && Early.TryGetValue(entry.Fingerprint, out early))
+            {
+                foreach (var declared in early)
+                    if (!entry.Prefabs.Contains(declared)) entry.Prefabs.Add(declared);
+
+                Early.Remove(entry.Fingerprint);
+            }
+
             // Everything except what is personal, not an opt-in list.
             //
             // It was opt-in and almost nothing opted in: two entries across thirteen mods. A
@@ -104,6 +127,84 @@ namespace Ezomic.Core
 
             CorePlugin.Log.LogInfo("Registered " + name + " " + version
                 + " (" + requirement + ") build " + entry.Fingerprint + caveat);
+        }
+
+        /// <summary>
+        /// Declare the prefabs a mod puts into the world.
+        ///
+        /// This is the one fact about a mod that nothing else can recover. A config entry
+        /// belongs to a plugin, a world key carries the mod's name and a stack frame prints its
+        /// namespace - but a prefab is a name and a GameObject in a scene registry that has
+        /// never recorded who added it. So a tool asking "what did Vaettir register, and is it
+        /// actually in this world" has no way to ask unless the mod answers.
+        ///
+        /// Worth having beyond curiosity: a mod that failed to register looks identical to a
+        /// mod whose piece you simply have not found, and those two want opposite reactions.
+        /// With the names declared, the difference is one lookup.
+        ///
+        /// Attributed by the CALLING ASSEMBLY rather than by a guid argument, matched against
+        /// the fingerprint Register already stamped. That is what lets the shared registrar call
+        /// it: Prefabs.cs is compiled into each mod, so the caller is the mod itself and there
+        /// is no guid in scope to pass. A name declared by an assembly that never registered is
+        /// dropped rather than throwing - a mod is free to use the registrar without Core.
+        /// </summary>
+        // NoInlining for the same reason Register has it: GetCallingAssembly answers relative
+        // to this frame, and an inlined call would report Core.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static void Owns(params string[] names)
+        {
+            if (names == null || names.Length == 0) return;
+
+            var fingerprint = FingerprintOf(Assembly.GetCallingAssembly());
+            if (string.IsNullOrEmpty(fingerprint)) return;
+
+            foreach (var entry in Mods.Values)
+            {
+                if (entry == null || entry.Fingerprint != fingerprint) continue;
+
+                foreach (var name in names)
+                {
+                    if (string.IsNullOrEmpty(name)) continue;
+                    if (entry.Prefabs.Contains(name)) continue;
+
+                    entry.Prefabs.Add(name);
+                }
+
+                return;
+            }
+
+            // Not registered yet, which is ordinary rather than wrong - see Early.
+            List<string> waiting;
+            if (!Early.TryGetValue(fingerprint, out waiting))
+            {
+                waiting = new List<string>();
+                Early[fingerprint] = waiting;
+            }
+
+            foreach (var name in names)
+            {
+                if (string.IsNullOrEmpty(name)) continue;
+                if (waiting.Contains(name)) continue;
+
+                waiting.Add(name);
+            }
+        }
+
+        /// <summary>
+        /// The prefab names a mod declared, or an empty list for one that declared none.
+        ///
+        /// Public because the tool that asks this is a different assembly - Devkit - and it has
+        /// no business reaching into Core's registry any other way. Returns a copy: the registry
+        /// is Core's and a caller iterating it while a mod registers a prefab on a later frame
+        /// would be iterating a list being written to.
+        /// </summary>
+        public static List<string> OwnedPrefabs(string guid)
+        {
+            ModEntry entry;
+
+            return string.IsNullOrEmpty(guid) || !Mods.TryGetValue(guid, out entry)
+                ? new List<string>()
+                : new List<string>(entry.Prefabs);
         }
 
         /// <summary>
