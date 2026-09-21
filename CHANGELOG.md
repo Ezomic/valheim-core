@@ -3,6 +3,19 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **A server can pick the voice of a chat line it sends.** Normal as before, or shout, which
+  the game draws in yellow and in capitals, or whisper, which it dims. The line still goes to
+  one player down their own connection, so a shout here is about how it reads and not about
+  who is sent it. Dyrr's warning before an idle kick is the first thing to use it: a notice
+  that you have two minutes left should not look like somebody saying hello.
+
+  Sent under a second name alongside the existing one, so a server still using the old one
+  keeps working exactly as it did.
+
 ## [1.2.5] - 2026-09-19
 
 ### Added
