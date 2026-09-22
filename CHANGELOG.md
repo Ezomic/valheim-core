@@ -3,7 +3,7 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
-## [1.4.0] - pending
+## [1.4.0] - 2026-09-22
 
 ### Added
 
