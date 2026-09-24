@@ -90,6 +90,24 @@ namespace Ezomic.Shared
     /// 3. Both of the above were permanent rather than transient because every writer took
     ///    the earliest answer and no writer could ever raise one. A better-sourced answer had
     ///    no way to correct a worse-sourced one. See Record() and Placement.
+    ///
+    /// 4. Bug 2 again, through a gate the fix for it did not know about. Valheim 1.0 added a
+    ///    third condition to a spawn row, m_requiredPersistentEvent, beside the world key and
+    ///    the weather, and Conditional() read only the two. Measured 2026-09-24 with
+    ///    Utangard's `utangard biomes` readout: Elaking, JotunWarrior and JotunWitch each carry
+    ///    a "Fimbulvinter" row whose mask is every biome (-1), gated by nothing but the
+    ///    jotun_invasion event. Read as unconditional, Earliest() of every biome is the
+    ///    Meadows, so Yoke's own item list had the Elaking and Jotun trophies, the Elaking
+    ///    hair bundle and the whole Vanguard chest family down as meadows items, raised at
+    ///    Eikthyr, while the rest of that armour sat correctly in the Deep North.
+    ///
+    ///    Counting the event as a gate was only half of it. The Jotun have no ungated row at
+    ///    all - their other one is a Deep North patrol behind the jotun_killed key - so a gate
+    ///    alone would have kept the invasion row as their only-row-standing and filed them in
+    ///    the Meadows exactly as before. An event row is therefore never used to place a
+    ///    creature: an invasion visits every biome and says nothing about where the creature
+    ///    lives. A creature that exists only through events is left unplaced by this route,
+    ///    which is the right answer when the alternative is the wrong biome. See SpawnIndex().
     /// ---------------------------------------------------------------------------------------
     /// </summary>
     public static class BiomeIndex
@@ -573,10 +591,15 @@ namespace Ezomic.Shared
             return row != null && row.m_enabled && !row.m_devDisabled && row.m_prefab != null;
         }
 
-        /// <summary>Whether the row's spawn waits on something outside the biome itself.</summary>
+        /// <summary>
+        /// Whether the row's spawn waits on something outside the biome itself: a world key, a
+        /// weather, or a persistent event. The third was missing until 2026-09-24 - see bug 4 in
+        /// the header - and its absence filed the Jotun invasion in the Meadows.
+        /// </summary>
         private static bool Conditional(SpawnSystem.SpawnData row)
         {
             return !string.IsNullOrEmpty(row.m_requiredGlobalKey)
+                   || !string.IsNullOrEmpty(row.m_requiredPersistentEvent)
                    || (row.m_requiredEnvironments != null && row.m_requiredEnvironments.Count > 0);
         }
 
@@ -591,6 +614,12 @@ namespace Ezomic.Shared
             // the clamp further down would otherwise happily hand such a row its key's biome
             // and invent a spawn out of a row that never spawns.
             if (masked < 0) return -1;
+
+            // An event row places nothing, whether or not the creature has a better row. It is
+            // an invasion, not a habitat - vanilla's Fimbulvinter rows name every biome at once
+            // - and the only-row-standing rule below would otherwise keep it for a creature
+            // whose other rows are all gated too, which is exactly the Jotun. Bug 4.
+            if (!string.IsNullOrEmpty(row.m_requiredPersistentEvent)) return -1;
 
             if (!Conditional(row)) return masked;
 
