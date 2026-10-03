@@ -135,11 +135,19 @@ Open the compendium (the inventory's raven tab) and pick **Settings** at the end
 - **Right:** the picked mod's settings in a **Display** group and a **Hotkeys** group. Each row
   shows its current value, its default and a **Reset**. A switch or a choice is clicked to change
   it, a number has a minus and a plus, and a key is clicked and then pressed.
-- **Key capture:** click a key box, press the key. Escape cancels, Backspace unbinds. A key
-  another listed setting already uses is refused with a line saying whose it is. The exception is
-  a setting's own default: Jafna, Malmr and Taum all default to Left Alt, so resetting one of them
-  must always work, and the page shows an amber box naming everything on a shared key and the
-  situation each acts in instead of refusing.
+- **Key capture:** click a key box, press the key. Escape cancels (so do B and Y on a gamepad),
+  Backspace unbinds. A key another listed setting already uses is refused with a line saying whose
+  it is, and the same goes for Reset. For a shortcut the whole chord is compared, modifiers
+  included, and rebinding keeps the modifiers it had. The one exception is a bind shared by
+  design: it is allowed only when it is the row's own default **and** every other row holding it
+  has it as its own default too. Jafna, Malmr and Taum all default to Left Alt, so resetting one of
+  them works, and the page shows an amber box naming everything on a shared key and the situation
+  each acts in instead of refusing. If another mod has moved onto a key that is your default,
+  Reset is refused and names it.
+- **Mouse buttons** can be bound unless the mod says it does not read them: `SettingsPanel.Add`
+  takes `readsThroughZInput` (default `true`). A mod reading through `UnityEngine.Input`, as
+  BepInEx's `KeyboardShortcut.IsDown` does, misses the middle mouse button here, so it passes
+  `false` and the page refuses mouse buttons for that row.
 - **Applied at once, and yours alone.** The entry is written when you click, BepInEx saves on
   every set, and nothing here is sent to a server.
 

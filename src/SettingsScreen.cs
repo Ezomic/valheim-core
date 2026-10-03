@@ -128,6 +128,8 @@ namespace Ezomic.Core
         private static SettingRow _capturing;
         private static int _captureFrame;
         private static string _refusal;
+        private static SettingRow _refusedRow;
+        private static int _consumedFrame = -1;
 
         private static readonly List<Entry> Entries = new List<Entry>();
         private static readonly List<Section> Sections = new List<Section>();
@@ -139,6 +141,18 @@ namespace Ezomic.Core
 
         /// <summary>True while a key is being waited for, which is what holds the compendium open.</summary>
         internal static bool Capturing { get { return _capturing != null; } }
+
+        /// <summary>
+        /// Whether the keys the capture owns are still to be hidden from vanilla this frame:
+        /// while it waits, and for the rest of the frame in which it ended. The ticker that
+        /// ends a capture and InventoryGui.Update run in an order Unity does not promise, and
+        /// when the ticker goes first the press that ended the capture would otherwise reach
+        /// the window, which closes on Escape, Tab and E.
+        /// </summary>
+        internal static bool KeysHeld
+        {
+            get { return IsShowing && (_capturing != null || _consumedFrame == Time.frameCount); }
+        }
 
         private class Frame
         {
@@ -291,7 +305,7 @@ namespace Ezomic.Core
             {
                 // Only while the page is on screen. A capture left open by closing the window
                 // must not go on hiding Tab from the window that opens it.
-                Active = Capturing && IsShowing;
+                Active = KeysHeld;
             }
 
             [HarmonyFinalizer]
@@ -315,9 +329,14 @@ namespace Ezomic.Core
         internal static class HideButtonDown
         {
             [HarmonyPostfix]
-            private static void Postfix(ref bool __result)
+            private static void Postfix(string name, ref bool __result)
             {
                 if (HideKeysFromWindow.Active) __result = false;
+
+                // The console opens from Console.Update, outside the inventory window, on the
+                // button of this name. It is a key somebody may want to bind, so it is hidden
+                // for as long as the capture holds the keys, wherever it is read from.
+                else if (name == "Console" && KeysHeld) __result = false;
             }
         }
 
@@ -441,8 +460,10 @@ namespace Ezomic.Core
 
         internal static void Cancel()
         {
+            _refusedRow = null;
             if (_capturing == null) return;
 
+            _consumedFrame = Time.frameCount;
             _capturing = null;
             _refusal = null;
         }
@@ -481,6 +502,14 @@ namespace Ezomic.Core
 
         private static void Listen()
         {
+            // B and Y are how a gamepad leaves a window, and a gamepad has no Escape to press.
+            if (ZInput.GetButtonDown("JoyButtonB") || ZInput.GetButtonDown("JoyButtonY"))
+            {
+                Cancel();
+                Refresh();
+                return;
+            }
+
             KeyCode key = PressedNow();
             if (key == KeyCode.None) return;
 
@@ -570,7 +599,8 @@ namespace Ezomic.Core
             if (row == null || SettingsModel.IsDefault(row)) return;
 
             Cancel();
-            SettingsModel.Reset(row);
+            _refusal = SettingsModel.Reset(SettingsModel.Pages(), row);
+            _refusedRow = _refusal != null ? row : null;
             Refresh();
         }
 
@@ -689,11 +719,17 @@ namespace Ezomic.Core
             SetText(w.Default, "Default: " + SettingsModel.DefaultText(row));
             Dress(w.Reset, !SettingsModel.IsDefault(row));
 
-            SetActive(w.Hint.gameObject, capturing);
+            bool refusedReset = !capturing && ReferenceEquals(_refusedRow, row) && _refusal != null;
+            SetActive(w.Hint.gameObject, capturing || refusedReset);
             if (capturing)
             {
                 SetText(w.Hint, Wrapped(_refusal != null ? _refusal + " Press another key, or Esc to cancel." : Hint, 1.23f));
                 SetColor(w.Hint, _refusal != null ? Red : Muted);
+            }
+            else if (refusedReset)
+            {
+                SetText(w.Hint, Wrapped(_refusal + " Reset refused.", 1.23f));
+                SetColor(w.Hint, Red);
             }
         }
 
@@ -1550,7 +1586,8 @@ namespace Ezomic.Core
             if (donor == null) return false;
 
             // Added after the Button, because ButtonSfx looks for it once, in Awake.
-            ButtonSfx sfx = button.GetComponent<ButtonSfx>() ?? button.AddComponent<ButtonSfx>();
+            ButtonSfx sfx = button.GetComponent<ButtonSfx>();
+            if (sfx == null) sfx = button.AddComponent<ButtonSfx>();
             sfx.m_sfxPrefab = donor.m_sfxPrefab;
             sfx.m_sfxPrefabVibrationOnly = donor.m_sfxPrefabVibrationOnly;
             sfx.m_selectSfxPrefab = donor.m_selectSfxPrefab;

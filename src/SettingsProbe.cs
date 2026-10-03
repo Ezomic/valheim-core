@@ -182,8 +182,10 @@ namespace Ezomic.Core
             SettingRow row = RowNamed(pages, args, 2, args.Length);
             if (row == null) { term.AddString("coresettings reset: no such row"); return; }
 
-            SettingsModel.Reset(row);
-            term.AddString("coresettings reset=" + Word(row.Label) + " value=" + Word(SettingsModel.ValueText(row)));
+            string refusal = SettingsModel.Reset(pages, row);
+            term.AddString(refusal == null
+                ? "coresettings reset=" + Word(row.Label) + " value=" + Word(SettingsModel.ValueText(row))
+                : "coresettings reset=no refusal=" + Word(refusal));
         }
 
         private static ModPage PageNamed(List<ModPage> pages, string name)

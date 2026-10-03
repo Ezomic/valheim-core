@@ -64,11 +64,18 @@ namespace Ezomic.Core
         /// in that state, "{0}" stands for the current value, and an empty string leaves the row
         /// out of the summary.
         /// </param>
+        /// <param name="readsThroughZInput">
+        /// Hotkeys only. True when the mod reads the key through ZInput, which sees every mouse
+        /// button. A mod reading through UnityEngine.Input, as BepInEx's own
+        /// KeyboardShortcut.IsDown does, misses the middle mouse button here, so it passes false
+        /// and the screen refuses a mouse button for that row instead of binding one that would
+        /// silently do nothing.
+        /// </param>
         // NoInlining for the reason Suite.Register has it: GetCallingAssembly answers relative
         // to this frame, and an inlined call would attribute every row to Core.
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static void Add(ConfigEntryBase entry, string label, SettingsGroup group,
-            string whenItActs = null, string summary = null)
+            string whenItActs = null, string summary = null, bool readsThroughZInput = true)
         {
             if (entry == null) throw new ArgumentNullException(nameof(entry));
             if (string.IsNullOrEmpty(label)) throw new ArgumentNullException(nameof(label));
@@ -87,6 +94,7 @@ namespace Ezomic.Core
                 Group = group,
                 When = string.IsNullOrEmpty(whenItActs) ? null : whenItActs,
                 Summary = summary,
+                ReadsThroughZInput = readsThroughZInput,
                 Owner = Assembly.GetCallingAssembly()
             };
 
@@ -110,6 +118,7 @@ namespace Ezomic.Core
         internal string When;
         internal string Summary;
         internal Assembly Owner;
+        internal bool ReadsThroughZInput = true;
 
         internal Type Type { get { return Entry.SettingType; } }
 
@@ -277,33 +286,101 @@ namespace Ezomic.Core
         }
 
         /// <summary>
-        /// Bind a key, or say why not. Null means it was written.
-        ///
-        /// A key another listed entry already holds is refused and the refusal names the owner,
-        /// with one exception: this entry's own default. Three mods ship on Left Alt on purpose,
-        /// and resetting one of them, or capturing its default by hand, has to land where Reset
-        /// would. The page warns about that case instead, in the box under the rows, because
-        /// the two features can only clash if they are active together and whether they are is
-        /// the question that box exists to put to the player.
+        /// A key as it would be compared: its main key and its modifiers, so Alt + F and F are
+        /// two different binds. Null for None, which holds nothing and clashes with nothing.
         /// </summary>
-        internal static string TryBind(List<ModPage> pages, SettingRow row, KeyCode key)
+        private static string ChordIn(object value)
         {
-            if (key != KeyCode.None && key != DefaultKeyOf(row.Entry))
-            {
-                foreach (ModPage page in pages)
-                {
-                    foreach (SettingRow other in page.Rows)
-                    {
-                        if (ReferenceEquals(other, row) || !other.IsKey || KeyOf(other.Entry) != key) continue;
+            KeyCode main = KeyIn(value);
+            if (main == KeyCode.None) return null;
 
-                        return KeyName(key) + " is already " + page.Name + "'s " + Lower(other.Label) + ".";
-                    }
+            var modifiers = new List<int>();
+            if (value is KeyboardShortcut)
+            {
+                IEnumerable<KeyCode> held = ((KeyboardShortcut)value).Modifiers;
+                if (held != null)
+                    foreach (KeyCode modifier in held) modifiers.Add((int)modifier);
+            }
+
+            modifiers.Sort();
+
+            var sb = new StringBuilder();
+            sb.Append((int)main);
+            foreach (int modifier in modifiers) sb.Append('+').Append(modifier);
+            return sb.ToString();
+        }
+
+        private static bool IsMouse(KeyCode key)
+        {
+            return key >= KeyCode.Mouse0 && key <= KeyCode.Mouse6;
+        }
+
+        /// <summary>
+        /// The value a capture writes: the key itself for a KeyCode entry, and for a shortcut
+        /// the key with the modifiers the entry already had, so rebinding Alt + F to G gives
+        /// Alt + G rather than quietly dropping the Alt.
+        /// </summary>
+        private static object Proposed(SettingRow row, KeyCode key)
+        {
+            if (row.Type != typeof(KeyboardShortcut)) return key;
+
+            var current = (KeyboardShortcut)row.Entry.BoxedValue;
+            var modifiers = new List<KeyCode>();
+            if (key != KeyCode.None && current.Modifiers != null)
+                foreach (KeyCode modifier in current.Modifiers)
+                    if (modifier != key) modifiers.Add(modifier);
+
+            return new KeyboardShortcut(key, modifiers.ToArray());
+        }
+
+        /// <summary>
+        /// Why this row may not take this value, or null.
+        ///
+        /// Two things refuse. A mouse button on a row whose mod does not read through ZInput.
+        /// And a bind another listed entry currently holds, whole shortcut against whole shortcut,
+        /// where the refusal names the holder. The one exception is a bind that is shared by
+        /// design: the value is this row's own default AND every other row holding it has it as
+        /// its own default too. Three mods ship on Left Alt on purpose, and resetting any of them,
+        /// or capturing Left Alt by hand, has to land. The same rule covers Reset, so a row cannot
+        /// be reset onto a key another mod has since moved onto, and it cannot be captured onto
+        /// its default behind the back of a holder that is only borrowing it. The page's box under
+        /// the rows warns about the by-design case instead of refusing it.
+        /// </summary>
+        private static string Refused(List<ModPage> pages, SettingRow row, object proposed)
+        {
+            string chord = ChordIn(proposed);
+            if (chord == null) return null;
+
+            if (!row.ReadsThroughZInput && IsMouse(KeyIn(proposed)))
+                return "Mouse buttons cannot be used for " + Lower(row.Label)
+                    + ", its mod does not read them.";
+
+            bool mine = chord == ChordIn(row.Entry.DefaultValue);
+
+            foreach (ModPage page in pages)
+            {
+                foreach (SettingRow other in page.Rows)
+                {
+                    if (ReferenceEquals(other, row) || !other.IsKey) continue;
+                    if (ChordIn(other.Entry.BoxedValue) != chord) continue;
+                    if (mine && ChordIn(other.Entry.DefaultValue) == chord) continue;
+
+                    return KeyName(KeyIn(proposed)) + " is already " + page.Name + "'s " + Lower(other.Label) + ".";
                 }
             }
 
-            if (row.Type == typeof(KeyboardShortcut)) row.Entry.BoxedValue = new KeyboardShortcut(key);
-            else row.Entry.BoxedValue = key;
+            return null;
+        }
 
+        /// <summary>Bind a key, or say why not. Null means it was written.</summary>
+        internal static string TryBind(List<ModPage> pages, SettingRow row, KeyCode key)
+        {
+            object proposed = Proposed(row, key);
+
+            string refusal = Refused(pages, row, proposed);
+            if (refusal != null) return refusal;
+
+            row.Entry.BoxedValue = proposed;
             return null;
         }
 
@@ -344,9 +421,17 @@ namespace Ezomic.Core
             return Equals(row.Entry.BoxedValue, row.Entry.DefaultValue);
         }
 
-        internal static void Reset(SettingRow row)
+        /// <summary>Back to the default, or the refusal that stops a key row doing so. Null means it was written.</summary>
+        internal static string Reset(List<ModPage> pages, SettingRow row)
         {
+            if (row.IsKey)
+            {
+                string refusal = Refused(pages, row, row.Entry.DefaultValue);
+                if (refusal != null) return refusal;
+            }
+
             row.Entry.BoxedValue = row.Entry.DefaultValue;
+            return null;
         }
 
         internal static void Toggle(SettingRow row)

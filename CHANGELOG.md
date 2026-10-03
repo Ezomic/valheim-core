@@ -26,6 +26,16 @@ and the mod uses [semantic versioning](https://semver.org).
   a plain text list if the panel cannot be drawn, and the `coresettings` console command, with the
   scenario `core-settings-screen`, reads and drives the same code a click does. Built, not run in game.
 
+  **Key capture rules, tightened after review.** The refusal now also covers Reset and a row's own
+  default: both are allowed only when every other row holding that key has it as its own default
+  too, otherwise the page names the holder. A shortcut is compared whole, modifiers included, and
+  rebinding keeps its modifiers. `SettingsPanel.Add` takes an optional `readsThroughZInput`
+  (default `true`); a mod that reads through `UnityEngine.Input` passes `false` and mouse buttons
+  are refused for that row. The keys a capture owns are hidden from the inventory window for the
+  frame the capture ended in as well as while it waits, so Escape, Tab and E no longer depend on
+  script order to stay out of vanilla's hands. B and Y cancel a capture on a gamepad, and the
+  Console key is hidden from the console while a key is awaited.
+
 ## [1.4.0] - 2026-09-22
 
 ### Added
