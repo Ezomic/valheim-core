@@ -1,0 +1,166 @@
+# Core: the Settings page in the compendium (LHM-51). Opens the page, then drives the real
+# capture, refusal, reset and shared-key code through `coresettings`, a console command Core
+# registers, and reads what the page drew with `panel`.
+#
+# What it proves, in order:
+#
+#   1. The Settings entry is in the compendium's list and clicking it shows the panel.
+#   2. The mods that list settings are on it, and exactly Jafna, Malmr and Taum are marked as
+#      sharing a key, because all three default to Left Alt.
+#   3. Jafna's page carries the amber box: "Left Alt is shared by three mods", with the three
+#      rows and the situation each acts in.
+#   4. Capturing a key for Taum that Varda already holds (H) is REFUSED, the refusal names Varda,
+#      the capture stays open and the page says so under the row.
+#   5. A free key (F10) is accepted, the row reads F10, and with Taum off Left Alt the box on
+#      Jafna's page now names two mods, not three.
+#   6. Capturing a key that another mod holds and that is this setting's own default (Left Alt for
+#      Jafna, while Malmr and Taum also hold it) is ACCEPTED. A refusal there would make Reset
+#      impossible on a shared default.
+#   7. Capturing Left Shift for Jafna is refused and names Kynda.
+#   8. Reset puts Taum back to Left Alt and the box names three mods again.
+#
+# What `coresettings` is. The verbs call SettingsModel and SettingsScreen, the code a click on the
+# panel reaches, so a pass is the real refusal and the real write, not a copy of them. `press`
+# answers a capture with a key without anyone pressing one. It cannot see the keyboard polling
+# itself, which is the first manual step below.
+#
+# What it cannot see, and a person has to:
+#
+#   - Whether the panel LOOKS like mockup B. `panel` reads the text a label holds, not where it is
+#     drawn, how big it is or what colour. Manual step 1.
+#   - Escape, Backspace and Tab during a real capture. Manual step 2.
+#   - Whether a text is cut off. Manual step 3.
+#
+# NEEDS: a world you host or singleplayer, Core with the Settings page, and these mods loaded with
+# their default keys: Jafna, Malmr, Taum (Left Alt), Kynda (Left Shift), Varda (H), Stund, Vaettir
+# and Devkit. F10 and F11 must be bound to nothing that lists on the page. English.
+#
+# LEAVES: nothing. Every key it rebinds is reset to its default before the end, and the page is
+# left open on Jafna.
+#
+# MANUAL STEPS.
+#
+#   1. Open the compendium, pick Settings, pick Jafna. Expected: the page matches the mockup
+#      (LHM-51-b): MODS list on the left with counts and summaries, an amber dot beside Jafna,
+#      Malmr and Taum and the legend "Shares a key with another mod" under the list, JAFNA in gold
+#      with "Applied at once. Yours alone." at the right, a DISPLAY group with "Show readout",
+#      a HOTKEYS group with "Raise hold", and the amber box under it with three rows.
+#   2. Click the Raise hold box. Expected: it turns gold and reads "Press a key..." with the line
+#      "Esc cancels. Backspace unbinds..." under it. Press Escape. Expected: the capture closes and
+#      the compendium STAYS open. Click it again and press Backspace. Expected: the row reads None
+#      and the compendium stays open. Click Reset. Expected: Left Alt. Click it again and press
+#      Tab, then E. Expected: each is taken as the key (or refused naming its owner) and the
+#      inventory does not close.
+#   3. Pick Stund and then Vaettir. Expected: every label is whole, nothing is cut with dots except
+#      a long summary in the list, Vaettir shows six key rows and Stund five rows with a minus and
+#      a plus on Size. Pick the Clock shows box and click it four times. Expected: Day and time,
+#      Time only, Day only, Time of day, and the clock on the screen follows each click.
+#   4. Close the compendium with a capture open, then open the inventory with Tab. Expected: it
+#      opens. (A capture left open must not swallow keys.)
+
+
+# ---- 1: the page opens
+
+clear
+compendium
+wait 1
+press Settings
+wait 1
+
+mod coresettings page
+printed showing=yes yes
+panel MODS yes
+
+
+# ---- 2: who is on it, and who shares
+
+mod coresettings list
+printed mod=Jafna yes
+printed mod=Malmr yes
+printed mod=Taum yes
+printed mod=Kynda yes
+printed mod=Varda yes
+printed mod=Stund rows=5 yes
+printed mod=Vaettir rows=6 yes
+printed sharing=3 yes
+printed mod=Jafna rows=2 shares=yes yes
+printed mod=Kynda rows=1 shares=no yes
+
+
+# ---- 3: Jafna's page and its box
+
+mod coresettings pick Jafna
+mod coresettings page
+printed selected=Jafna yes
+panel JAFNA yes
+panel Raise hold yes
+panel Left Alt is shared by three mods yes
+panel while mining a deposit yes
+panel while leading an animal yes
+
+mod coresettings shared Jafna
+printed boxes=1 yes
+printed users=3 yes
+
+
+# ---- 4: a key another mod holds is refused, and says which
+
+mod coresettings capture Taum Follow modifier
+printed capturing=Follow_modifier yes
+mod coresettings press H
+printed bound=no yes
+printed Varda yes
+mod coresettings page
+printed capturing=yes yes
+panel is already Varda yes
+mod coresettings show Taum Follow modifier
+printed value=Left_Alt yes
+printed isdefault=yes yes
+
+
+# ---- 5: a free key is taken, and the box shrinks to two
+
+mod coresettings press F10
+printed bound=yes yes
+mod coresettings show Taum Follow modifier
+printed value=F10 yes
+printed isdefault=no yes
+panel F10 yes
+mod coresettings page
+printed capturing=no yes
+mod coresettings shared Jafna
+printed users=2 yes
+
+
+# ---- 6: this setting's own default is allowed even though others hold it
+
+mod coresettings capture Jafna Raise hold
+mod coresettings press F11
+printed bound=yes yes
+mod coresettings capture Jafna Raise hold
+mod coresettings press LeftAlt
+printed bound=yes yes
+mod coresettings show Jafna Raise hold
+printed value=Left_Alt yes
+printed isdefault=yes yes
+
+
+# ---- 7: Left Shift is Kynda's
+
+mod coresettings capture Jafna Raise hold
+mod coresettings press LeftShift
+printed bound=no yes
+printed Kynda yes
+mod coresettings show Jafna Raise hold
+printed value=Left_Alt yes
+mod coresettings cancel
+printed capturing=no yes
+
+
+# ---- 8: reset puts Taum back, and the box is three again
+
+mod coresettings reset Taum Follow modifier
+printed value=Left_Alt yes
+mod coresettings shared Jafna
+printed users=3 yes
+panel Left Alt is shared by three mods yes

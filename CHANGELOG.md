@@ -3,6 +3,39 @@
 Notable changes to Core. Format follows [Keep a Changelog](https://keepachangelog.com),
 and the mod uses [semantic versioning](https://semver.org).
 
+## Unreleased
+
+### Added
+
+- **A Settings page in the compendium (LHM-51).** One place for what a player may change without
+  opening a `.cfg`: display options and hotkeys, mod by mod. A mod lists an entry with
+  `SettingsPanel.Add(entry, label, group, whenItActs, summary)`, and Core draws the page. A change is
+  written to the entry at once, which BepInEx saves, so it applies now and survives a relog.
+
+  **The registration API is additive.** Nothing existing changed meaning: `Suite`, the version gate,
+  the config sync and the rows are as they were, a mod that never calls it is untouched, and a mod
+  that lists a setting calls it from a guarded method inside a try, so one running against a Core
+  without the page is meant to lose the listing and nothing else. It is still a Core build the gate compares, so every client and server needs
+  the same one, as for any Core change.
+
+  Only a player's own settings are ever listed: a `KeyCode` or `KeyboardShortcut`, or an entry the
+  mod declared with `Suite.Local`. The test is the config sync's own (absent from the synced set), so
+  a value the host imposes never appears. Key capture refuses a key another listed setting already
+  holds and says whose, except a setting's own default, because three mods ship on Left Alt and a
+  reset has to land. A box under the keys names everything on a shared key, and when each acts. It is
+  a plain text list if the panel cannot be drawn, and the `coresettings` console command, with the
+  scenario `core-settings-screen`, reads and drives the same code a click does. Built, not run in game.
+
+  **Key capture rules, tightened after review.** The refusal now also covers Reset and a row's own
+  default: both are allowed only when every other row holding that key has it as its own default
+  too, otherwise the page names the holder. A shortcut is compared whole, modifiers included, and
+  rebinding keeps its modifiers. `SettingsPanel.Add` takes an optional `readsThroughZInput`
+  (default `true`); a mod that reads through `UnityEngine.Input` passes `false` and mouse buttons
+  are refused for that row. The keys a capture owns are hidden from the inventory window for the
+  frame the capture ended in as well as while it waits, so Escape, Tab and E no longer depend on
+  script order to stay out of vanilla's hands. B and Y cancel a capture on a gamepad, and the
+  Console key is hidden from the console while a key is awaited.
+
 ## [1.4.0] - 2026-09-22
 
 ### Added
