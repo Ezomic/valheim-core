@@ -226,7 +226,7 @@ namespace Ezomic.Core
         /// Truncated for logs. Twelve hex digits is 48 bits; two different builds colliding
         /// is not a thing that will happen to anyone.
         /// </summary>
-        private static string FingerprintOf(Assembly assembly)
+        internal static string FingerprintOf(Assembly assembly)
         {
             if (assembly == null) return "";
 

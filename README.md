@@ -27,6 +27,15 @@ It is a single DLL with no assets, built against Valheim 1.0.7, Unity 6000.0.75,
   of its own choosing. Vanilla cannot: its chat message names a connected player, and a
   server is not one. Crier uses it for chat written on the Longhouse site.
 
+- **Settings page.** A page called Settings at the end of the compendium's list, with the mods
+  that list a setting down the left and one mod's display options and hotkeys on the right. A
+  change applies at once and is written to the mod's own `.cfg`, so it survives a relog. Only a
+  player's own settings are on it: a key, or a setting the mod declared personal with
+  `Suite.Local`. A value the host imposes never appears, so what the page lists is exactly what
+  can be changed. A key another mod already uses is refused and the page says whose it is.
+  Three mods ship on Left Alt on purpose, and the page says so in a box under the keys, with
+  what each of them does and when. See [Settings page](#settings-page).
+
 The first three can be turned off in the config file. The chat line has nothing to turn off:
 nothing sends it but a server running Crier.
 
@@ -117,6 +126,32 @@ believes in. Core works with that rather than against it.
 If the row patches do not all apply, Core does not drive rows at all and logs an error. Rows
 claimed without the load protection is the one combination that destroys items.
 
+## Settings page
+
+Open the compendium (the inventory's raven tab) and pick **Settings** at the end of its list.
+
+- **Left:** every mod that lists a setting, in alphabetical order, with a count, a one line
+  summary of what it is set to, and an amber dot when one of its keys is also another mod's.
+- **Right:** the picked mod's settings in a **Display** group and a **Hotkeys** group. Each row
+  shows its current value, its default and a **Reset**. A switch or a choice is clicked to change
+  it, a number has a minus and a plus, and a key is clicked and then pressed.
+- **Key capture:** click a key box, press the key. Escape cancels, Backspace unbinds. A key
+  another listed setting already uses is refused with a line saying whose it is. The exception is
+  a setting's own default: Jafna, Malmr and Taum all default to Left Alt, so resetting one of them
+  must always work, and the page shows an amber box naming everything on a shared key and the
+  situation each acts in instead of refusing.
+- **Applied at once, and yours alone.** The entry is written when you click, BepInEx saves on
+  every set, and nothing here is sent to a server.
+
+It is drawn inside the compendium's own page, as Utangard's panel is, and is a plain text list of
+the same settings if it cannot be drawn. Keys are read from the keyboard and mouse; a gamepad can
+click everything except a capture.
+
+The page differs from its mockup in three places, on purpose. The mockup draws its own title and a
+row of tabs, which here are the compendium's title and its list. A number is a row with a minus and
+a plus, which the mockup has no example of. And a mod with too long a summary has it cut with
+dots rather than wrapped.
+
 ## For mod authors
 
 Register from `Awake`, after binding config:
@@ -194,6 +229,34 @@ is the lookup; `BiomeForKey` and `Overrides` are the delegates the host mod fill
 Hirsla link it.
 
 Fixing either file means rebuilding every mod that links it.
+
+### Listing a setting on the Settings page
+
+```csharp
+SettingsPanel.Add(JafnaConfig.HoldKey, "Raise hold", SettingsGroup.Hotkeys, "while levelling with the hoe");
+```
+
+`SettingsPanel.Add(entry, label, group, whenItActs = null, summary = null)`. The entry is a cfg
+entry of type `bool`, `int` (give it an `AcceptableValueRange` so the plus and minus stop), an enum,
+`KeyCode` or `KeyboardShortcut`. `whenItActs` is for keys: a few words for the situation the key
+does something in, which is what lets the page tell two features on one key apart. `summary` is how
+the row reads in the list's one line: `null` gives "label KEY", "label on" or the value, `"on|off"`
+gives a switch its own two phrases, `"{0}"` is the value and `""` leaves the row out.
+
+Only a player's own settings are shown, and the page decides that, not the mod. For a mod that
+registered with the gate that is the config sync's own test, "not in the synced set", asked when
+the page is drawn, so calling `Suite.Local` before or after `Add` does not matter. A mod that never
+registered, Devkit being the one, may list keys only. An entry the host would impose is skipped
+without a word: a control that is put straight back would be worse than no control.
+
+Like everything else here it is soft. Call it from the same guarded, never inlined method as
+`Suite.Register`, and wrap that call in a try so a Core older than this page costs the listing and
+nothing else:
+
+```csharp
+try { ListOnSettingsScreen(); }
+catch (System.Exception e) { Log.LogInfo("Core has no settings screen: " + e.Message); }
+```
 
 ## Troubleshooting
 

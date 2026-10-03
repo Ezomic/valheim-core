@@ -162,6 +162,16 @@ namespace Ezomic.Core
             ConfigWired = Apply("config sync", typeof(ConfigSync));
             Apply("connect-error text", typeof(ConnectError));
 
+            // Separately, so the page can lose its Escape guard or its console probe and still
+            // be there. A page that fails to draw falls back to a text list on its own, and a
+            // failure here costs only this screen.
+            Apply("settings page list", typeof(SettingsScreen.AddPage));
+            Apply("settings page", typeof(SettingsScreen.Show));
+            Apply("settings key capture", typeof(SettingsScreen.HideKeysFromWindow));
+            Apply("settings key capture", typeof(SettingsScreen.HideKeyDown));
+            Apply("settings key capture", typeof(SettingsScreen.HideButtonDown));
+            Apply("settings console probe", typeof(SettingsProbe.Hook));
+
             // Core puts itself on its own gate. It was not on it before, which left the one
             // mod every other mod depends on as the only one whose mismatch went unreported -
             // and a Core mismatch is worse than any of theirs, because it is the handshake
