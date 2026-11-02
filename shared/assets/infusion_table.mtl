@@ -1,0 +1,15 @@
+newmtl wood
+Kd 0.45 0.34 0.20
+Ka 0 0 0
+Ks 0 0 0
+
+newmtl stone
+Kd 0.50 0.50 0.48
+Ka 0 0 0
+Ks 0 0 0
+
+newmtl liquid
+Kd 0.35 0.85 1.00
+Ka 0 0 0
+Ks 0 0 0
+Ke 0.35 0.85 1.00

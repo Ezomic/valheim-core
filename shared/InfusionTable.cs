@@ -1,0 +1,917 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using HarmonyLib;
+using UnityEngine;
+
+namespace Ezomic.Shared
+{
+    /// <summary>
+    /// The Infusion Table: one crafting station shared by every mod that wants to combine two
+    /// items into a third, and a helper for adding recipes that use it.
+    ///
+    /// <b>This file is shared source, not a library</b>, for the reason <see cref="Prefabs"/>
+    /// gives: Core is a soft dependency, and a mod that cannot register its own station must
+    /// not need Core to do so. It is linked into each consumer and is not part of
+    /// EzomicCore.dll. It also needs <c>shared\Prefabs.cs</c> linked, and uses it for the
+    /// parts that are not specific to a table: the holder, the clone, the ZNetScene
+    /// registration and the tool's piece table.
+    ///
+    /// <code>
+    /// &lt;Compile Include="..\core\shared\Prefabs.cs" Link="shared\Prefabs.cs" /&gt;
+    /// &lt;Compile Include="..\core\shared\InfusionTable.cs" Link="shared\InfusionTable.cs" /&gt;
+    /// </code>
+    ///
+    /// <b>The model and icon travel beside the DLL.</b> There are no asset bundles in this
+    /// suite, so the mesh is an .obj read at runtime and the icon a .png, both looked up
+    /// next to the linking mod's own assembly. The csproj of every consumer copies them in
+    /// its Deploy target, next to the line that copies the DLL:
+    ///
+    /// <code>
+    /// &lt;Copy SourceFiles="..\core\shared\assets\infusion_table.obj;..\core\shared\assets\infusion_table.png"
+    ///       DestinationFolder="$(DeployDir)" ContinueOnError="true" /&gt;
+    /// </code>
+    ///
+    /// and its Thunderstore package carries the same two files. A consumer that forgets
+    /// still gets a working table: it logs once and wears the workbench's own look.
+    ///
+    /// <code>
+    /// // once, in Awake
+    /// Prefabs.Log = Logger;
+    /// InfusionTable.AddRecipe("SwordIron", "Ruby", "SwordIronInfused");
+    ///
+    /// // every frame, in Update
+    /// InfusionTable.Tick();
+    /// </code>
+    ///
+    /// <b>Prefab name <c>piece_ezomic_infusion</c> is permanent.</b> It is the network
+    /// identity ZNetScene keys on and every placed table stores its hash, so renaming it, or
+    /// failing to register it in a world that has one placed, discards every table in that
+    /// world silently. What is stored and compared is that name. What a player sees is
+    /// "Infusion Table".
+    ///
+    /// <b>Per world, and across mods.</b> Registration asks the live ZNetScene whether it
+    /// already knows the prefab and registers only if it does not, so two mods linking this
+    /// file never double-register: whichever ticks first wins the world and the other finds
+    /// the prefab there. The Hammer's piece table and ObjectDB's recipe list get the same
+    /// treatment, asked rather than remembered, because both are rebuilt with every world.
+    /// The only state kept for the process is the built prefab, which is meshes read off
+    /// disk and materials, none of which change between worlds. Each linking DLL has its own
+    /// copy of these statics, which is exactly why nothing here is an API between mods.
+    /// </summary>
+    public static class InfusionTable
+    {
+        /// <summary>The network identity. Never rename it.</summary>
+        public const string PrefabName = "piece_ezomic_infusion";
+
+        /// <summary>
+        /// What a player sees, and also the CraftingStation's name, which is what the game
+        /// matches a recipe's station on. Distinct from the workbench's on purpose: a table
+        /// that shared its name would count as a workbench for every recipe that needs one.
+        /// </summary>
+        public const string DisplayName = "Infusion Table";
+
+        private const string DonorPrefab = "piece_workbench";
+        private const string ModelFile = "infusion_table.obj";
+        private const string IconFile = "infusion_table.png";
+
+        // Early materials, buildable from the workbench area in the Meadows: Flint rather
+        // than Resin, because Resin comes off Greydwarves and would put the table behind the
+        // first forest.
+        private static readonly string[] CostItems = { "Wood", "Stone", "Flint" };
+        private static readonly int[] CostAmounts = { 10, 8, 4 };
+
+        /// <summary>Vanilla things whose material reads as lit, best first.</summary>
+        private static readonly string[] GlowDonors = { "guard_stone", "piece_dvergr_lantern" };
+
+        private static readonly Color LiquidColour = new Color(0.35f, 0.85f, 1f);
+        private const float LightRange = 3f;
+        private const float LightIntensity = 1.2f;
+
+        /// <summary>Seconds between the checks that are not about ZDO safety.</summary>
+        private const float HousekeepingInterval = 1f;
+
+        /// <summary>
+        /// How many builds may fail before the table is left alone for the rest of the
+        /// session. Generous and spaced out: a failed build is usually something the scene
+        /// has not finished loading, and giving up on it too early means placed tables go
+        /// missing from the world.
+        /// </summary>
+        private const int MaxFailures = 30;
+
+        private sealed class Want
+        {
+            internal string Base, Infusing, Output;
+        }
+
+        private static readonly List<Want> Wanted = new List<Want>();
+        private static readonly HashSet<string> Told = new HashSet<string>();
+
+        private static GameObject _prefab;
+        private static int _failures;
+        private static bool _abandoned;
+        private static float _retryAt;
+        private static float _nextHousekeeping;
+        private static Sprite _icon;
+
+        // What the prefab was dressed with, so a later world can tell it needs dressing again.
+        private static MeshRenderer _renderer;
+        private static Mesh _mesh;
+        private static Vector2[] _baseUv;
+        private static string[] _groups;
+        private static GameObject _woodSource, _stoneSource, _glowSource;
+        private static Material _woodMaterial, _stoneMaterial, _liquidMaterial, _liquidTinted;
+
+        // ------------------------------------------------------------------ public
+
+        /// <summary>
+        /// Declare a recipe: <paramref name="baseItem"/> and <paramref name="infusingItem"/>
+        /// go in, a fresh <paramref name="outputItem"/> comes out, at the Infusion Table.
+        /// Item arguments are prefab names.
+        ///
+        /// The recipe is added to ObjectDB by <see cref="Tick"/> and added again to every
+        /// world after the first. Declaring the same recipe twice is harmless, and so is
+        /// declaring one a second mod already declared: an equivalent recipe already in
+        /// ObjectDB is left alone.
+        ///
+        /// A null name is logged and ignored. A name that no item answers to is logged once
+        /// and retried, because the item may belong to a mod that registers it a few frames
+        /// later.
+        ///
+        /// Quality is ignored: both inputs are consumed whatever quality they are, which is
+        /// why the base item must be one that can only ever be quality 1. A base that can be
+        /// upgraded is refused, since vanilla would take a quality 3 sword as readily as a
+        /// quality 1 one and nothing here carries quality over.
+        /// </summary>
+        public static void AddRecipe(string baseItem, string infusingItem, string outputItem)
+        {
+            if (string.IsNullOrEmpty(baseItem) || string.IsNullOrEmpty(infusingItem)
+                || string.IsNullOrEmpty(outputItem))
+            {
+                Prefabs.Log.LogWarning("InfusionTable.AddRecipe needs three item names, got '"
+                    + baseItem + "', '" + infusingItem + "', '" + outputItem
+                    + "'. Recipe ignored.");
+                return;
+            }
+
+            foreach (Want existing in Wanted)
+                if (existing.Base == baseItem && existing.Infusing == infusingItem
+                    && existing.Output == outputItem) return;
+
+            Wanted.Add(new Want { Base = baseItem, Infusing = infusingItem, Output = outputItem });
+        }
+
+        /// <summary>
+        /// Call this from the plugin's Update, next to <c>Prefabs.Tick()</c>. Cheap once
+        /// everything is in place: registration is a dictionary read, and the rest runs
+        /// about once a second.
+        /// </summary>
+        public static void Tick()
+        {
+            ZNetScene scene = ZNetScene.instance;
+            ObjectDB db = ObjectDB.instance;
+            if (scene == null || !HasItems(db)) return;
+
+            // Every frame and never throttled: this is the call that stops ZNetScene from
+            // discarding a placed table, and the sooner it lands the fewer ZDOs are asked
+            // about a prefab the scene has never heard of.
+            GameObject table = scene.GetPrefab(PrefabName);
+            if (table == null) table = Introduce(scene, db);
+            if (table == null) return;
+
+            if (table == _prefab) Reskin(scene, db);
+
+            if (Time.unscaledTime < _nextHousekeeping) return;
+            _nextHousekeeping = Time.unscaledTime + HousekeepingInterval;
+
+            AddToHammer(table);
+            PlaceRecipes(db, table);
+        }
+
+        // ------------------------------------------------------------------ registering
+
+        /// <summary>
+        /// ObjectDB's first Awake of a session is a stub with no items. Building against it
+        /// finds no Wood, no Stone and no Hammer, so an empty item list means "not yet".
+        /// </summary>
+        private static bool HasItems(ObjectDB db)
+        {
+            return db != null && db.m_items != null && db.m_items.Count > 0;
+        }
+
+        private static GameObject Introduce(ZNetScene scene, ObjectDB db)
+        {
+            if (_abandoned || Time.unscaledTime < _retryAt) return null;
+            if (_prefab == null && !TryBuild(scene, db)) return null;
+
+            return Prefabs.Register(_prefab) ? _prefab : null;
+        }
+
+        private static bool TryBuild(ZNetScene scene, ObjectDB db)
+        {
+            try
+            {
+                _prefab = Build(scene, db);
+            }
+            catch (Exception e)
+            {
+                Prefabs.Log.LogWarning("Building " + PrefabName + " failed: " + e);
+            }
+
+            if (_prefab != null)
+            {
+                _failures = 0;
+                return true;
+            }
+
+            _retryAt = Time.unscaledTime + 1f;
+            if (++_failures < MaxFailures) return false;
+
+            _abandoned = true;
+            Prefabs.Log.LogError(PrefabName + " could not be built after " + MaxFailures
+                + " attempts and will not be retried. Tables already placed in a world are "
+                + "untouched on disk, but the world will discard them while this stays unbuilt.");
+            return false;
+        }
+
+        private static void AddToHammer(GameObject table)
+        {
+            PieceTable pieces = Prefabs.ToolPieces("Hammer");
+            if (pieces == null) return;
+
+            // By name, not by reference: another mod's copy of this file may have registered
+            // its own build of the same prefab, and the table in the scene is the only one
+            // the menu should hold.
+            foreach (GameObject piece in pieces.m_pieces)
+                if (piece != null && piece.name == PrefabName) return;
+
+            pieces.m_pieces.Add(table);
+            Prefabs.Log.LogInfo(PrefabName + " added to the Hammer.");
+        }
+
+        // ------------------------------------------------------------------ building
+
+        private static GameObject Build(ZNetScene scene, ObjectDB db)
+        {
+            GameObject workbench = scene.GetPrefab(DonorPrefab);
+            if (workbench == null)
+            {
+                Once("donor", "No " + DonorPrefab + " in the scene to build the Infusion Table from.");
+                return null;
+            }
+
+            CraftingStation workbenchStation = workbench.GetComponent<CraftingStation>();
+            Piece.Requirement[] cost = Cost(db);
+            if (workbenchStation == null || cost == null) return null;
+
+            GameObject clone = Prefabs.Clone(workbench, PrefabName);
+            try
+            {
+                Dress(clone, workbenchStation, cost);
+            }
+            catch
+            {
+                UnityEngine.Object.DestroyImmediate(clone);
+                throw;
+            }
+
+            return clone;
+        }
+
+        private static Piece.Requirement[] Cost(ObjectDB db)
+        {
+            Piece.Requirement[] cost = new Piece.Requirement[CostItems.Length];
+            for (int i = 0; i < cost.Length; i++)
+            {
+                ItemDrop item = ItemOf(db, CostItems[i]);
+                if (item == null)
+                {
+                    Once("cost:" + CostItems[i], "Cannot cost the Infusion Table: no item named "
+                        + CostItems[i] + ".");
+                    return null;
+                }
+
+                cost[i] = new Piece.Requirement { m_resItem = item, m_amount = CostAmounts[i] };
+            }
+
+            return cost;
+        }
+
+        private static void Dress(GameObject clone, CraftingStation workbenchStation,
+            Piece.Requirement[] cost)
+        {
+            Piece piece = clone.GetComponent<Piece>();
+            CraftingStation station = clone.GetComponent<CraftingStation>();
+            if (piece == null || station == null)
+                throw new InvalidOperationException(DonorPrefab + " has no Piece or CraftingStation.");
+
+            Sprite icon = LoadIcon();
+
+            piece.m_name = DisplayName;
+            piece.m_description = "A basin on a workbench frame, where one item is infused with another.";
+            piece.m_resources = cost;
+
+            // The table is a bench of its own, but it is built from the workbench's area: it
+            // needs one standing nearby, which is what keeps it an early-game piece.
+            piece.m_craftingStation = workbenchStation;
+            if (icon != null) piece.m_icon = icon;
+
+            station.m_name = DisplayName;
+            if (icon != null) station.m_icon = icon;
+
+            // The workbench lists every recipe that needs no station. The table is for
+            // infusing and nothing else.
+            station.m_showBasicRecipies = false;
+
+            Reface(clone);
+        }
+
+        /// <summary>
+        /// Swap the workbench's visuals and collision for the table's own, and leave the
+        /// machinery alone: ZNetView, Piece, WearNTear and CraftingStation stay, and so do
+        /// the transforms the station points at (roof check, connection point).
+        /// </summary>
+        private static void Reface(GameObject clone)
+        {
+            string path = AssetPath(ModelFile);
+            Model model = File.Exists(path) ? LoadModel(path) : null;
+            if (model == null)
+            {
+                Once("model", ModelFile + " is missing or unreadable beside the dll (" + path
+                    + "). The Infusion Table will look like a workbench until it is copied there.");
+                return;
+            }
+
+            // Components, not their GameObjects: a renderer's object may also carry the roof
+            // check point or the connection point the CraftingStation holds a reference to.
+            // Renderers first, because a MeshFilter cannot be destroyed under one.
+            foreach (Renderer renderer in clone.GetComponentsInChildren<Renderer>(true))
+                if (renderer is MeshRenderer || renderer is SkinnedMeshRenderer)
+                    UnityEngine.Object.DestroyImmediate(renderer);
+
+            foreach (MeshFilter filter in clone.GetComponentsInChildren<MeshFilter>(true))
+                UnityEngine.Object.DestroyImmediate(filter);
+
+            foreach (LODGroup group in clone.GetComponentsInChildren<LODGroup>(true))
+                UnityEngine.Object.DestroyImmediate(group);
+
+            // Solid colliders only. A trigger is part of how the station works, not part of
+            // how it looks.
+            foreach (Collider collider in clone.GetComponentsInChildren<Collider>(true))
+                if (!collider.isTrigger) UnityEngine.Object.DestroyImmediate(collider);
+
+            GameObject visual = new GameObject("infusion_visual");
+            visual.transform.SetParent(clone.transform, false);
+            visual.layer = clone.layer;
+            visual.AddComponent<MeshFilter>().sharedMesh = model.Mesh;
+
+            _renderer = visual.AddComponent<MeshRenderer>();
+            _renderer.sharedMaterials = new Material[model.Groups.Length];
+            _mesh = model.Mesh;
+            _baseUv = model.Mesh.uv;
+            _groups = model.Groups;
+            _woodSource = _stoneSource = _glowSource = null;
+            _woodMaterial = _stoneMaterial = _liquidMaterial = null;
+
+            GameObject collision = new GameObject("infusion_collision");
+            collision.transform.SetParent(clone.transform, false);
+            collision.layer = clone.layer;
+            BoxCollider box = collision.AddComponent<BoxCollider>();
+            box.center = model.Mesh.bounds.center;
+            box.size = model.Mesh.bounds.size;
+
+            // WearNTear switches between its three look objects as health falls and does not
+            // check that they exist. All three pointing at one object keeps it from ever
+            // dereferencing one that is gone, and the table has no worn or broken state.
+            WearNTear wear = clone.GetComponent<WearNTear>();
+            if (wear != null) wear.m_new = wear.m_worn = wear.m_broken = visual;
+
+            AttachLight(visual.transform, model);
+        }
+
+        /// <summary>
+        /// A point light at the basin. Vanilla paints its emission into a texture, so a plain
+        /// colour on a borrowed material will not glow, and writing to a shared material
+        /// would recolour everything else that wears it. The light is what lights the room.
+        /// </summary>
+        private static void AttachLight(Transform visual, Model model)
+        {
+            int slot = Array.FindIndex(model.Groups,
+                g => string.Equals(g, "liquid", StringComparison.OrdinalIgnoreCase));
+            if (slot < 0) return;
+
+            int[] triangles = model.Mesh.GetTriangles(slot);
+            if (triangles.Length == 0) return;
+
+            Vector3[] vertices = model.Mesh.vertices;
+            Vector3 min = vertices[triangles[0]];
+            Vector3 max = min;
+            foreach (int index in triangles)
+            {
+                min = Vector3.Min(min, vertices[index]);
+                max = Vector3.Max(max, vertices[index]);
+            }
+
+            GameObject anchor = new GameObject("infusion_light");
+            anchor.transform.SetParent(visual, false);
+            anchor.transform.localPosition = (min + max) * 0.5f + Vector3.up * 0.1f;
+
+            Light light = anchor.AddComponent<Light>();
+            light.type = LightType.Point;
+            light.color = LiquidColour;
+            light.range = LightRange;
+            light.intensity = LightIntensity;
+            light.shadows = LightShadows.None;
+        }
+
+        // ------------------------------------------------------------------ materials
+
+        /// <summary>
+        /// Dress the table in the current world's materials, when the ones it wears are not
+        /// them. Asked every frame of the world rather than hooked on ObjectDB.Awake and
+        /// CopyOtherDB: the prefab a material was borrowed from is a different object after
+        /// either, so comparing it is the same test with no patch to apply once per linking
+        /// mod.
+        /// </summary>
+        private static void Reskin(ZNetScene scene, ObjectDB db)
+        {
+            if (_renderer == null || _mesh == null) return;
+
+            GameObject wood = db.GetItemPrefab("Wood");
+            GameObject stone = db.GetItemPrefab("Stone");
+            GameObject glow = FirstPrefab(scene, GlowDonors);
+
+            if (_woodMaterial != null && _stoneMaterial != null && _liquidMaterial != null
+                && _woodSource == wood && _stoneSource == stone && _glowSource == glow) return;
+
+            GameObject workbench = scene.GetPrefab(DonorPrefab);
+            Surface woodSurface = Borrow(false, wood, workbench);
+            Surface stoneSurface = Borrow(false, stone, scene.GetPrefab("stone_wall_2x1"), workbench);
+            Surface liquidSurface = Borrow(true, glow);
+
+            // No emissive donor: the basin wears stone and the tint and the light carry it.
+            if (liquidSurface == null) liquidSurface = stoneSurface;
+
+            if (woodSurface == null || stoneSurface == null)
+            {
+                Once("surface", "No material to dress the Infusion Table with. It stays unskinned.");
+                return;
+            }
+
+            Material[] materials = new Material[_groups.Length];
+            Rect[] rects = new Rect[_groups.Length];
+            // The game's own copies of a prefab carry no property block from this one, so the
+            // tint lives on a material of our own, copied from the donor, which is never written.
+            if (_liquidTinted != null) UnityEngine.Object.Destroy(_liquidTinted);
+            _liquidTinted = new Material(liquidSurface.Material) { name = "infusion_liquid" };
+            _liquidTinted.SetColor("_Color", LiquidColour);
+            _liquidTinted.SetColor("_EmissionColor", LiquidColour * 2f);
+
+            for (int i = 0; i < _groups.Length; i++)
+            {
+                Surface surface = SurfaceFor(_groups[i], woodSurface, stoneSurface, liquidSurface);
+                materials[i] = IsLiquid(_groups[i]) ? _liquidTinted : surface.Material;
+                rects[i] = surface.Rect;
+            }
+
+            _renderer.sharedMaterials = materials;
+            Remap(_mesh, _baseUv, rects);
+
+            _woodSource = wood;
+            _stoneSource = stone;
+            _glowSource = glow;
+            _woodMaterial = woodSurface.Material;
+            _stoneMaterial = stoneSurface.Material;
+            _liquidMaterial = liquidSurface.Material;
+
+            Prefabs.Log.LogInfo("Infusion Table skinned: wood from " + woodSurface.Source
+                + ", stone from " + stoneSurface.Source + ", liquid from " + liquidSurface.Source
+                + (liquidSurface == stoneSurface ? " (no emissive donor)" : "") + ".");
+        }
+
+        private sealed class Surface
+        {
+            internal Material Material;
+            internal Rect Rect;
+            internal string Source;
+        }
+
+        private static bool IsLiquid(string group)
+        {
+            return string.Equals(group, "liquid", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static Surface SurfaceFor(string group, Surface wood, Surface stone, Surface liquid)
+        {
+            if (IsLiquid(group)) return liquid;
+            return string.Equals(group, "stone", StringComparison.OrdinalIgnoreCase) ? stone : wood;
+        }
+
+        private static GameObject FirstPrefab(ZNetScene scene, string[] names)
+        {
+            foreach (string name in names)
+            {
+                GameObject prefab = scene.GetPrefab(name);
+                if (prefab != null) return prefab;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// The first donor, in order, that has a material with an albedo to borrow (and an
+        /// _EmissionColor, when asked). Borrowed whole, never with its _MainTex swapped: the
+        /// donor's normal map would come with it and be sampled through our UVs.
+        /// </summary>
+        private static Surface Borrow(bool needEmission, params GameObject[] donors)
+        {
+            foreach (GameObject donor in donors)
+            {
+                if (donor == null) continue;
+
+                foreach (MeshRenderer renderer in donor.GetComponentsInChildren<MeshRenderer>(true))
+                {
+                    Material material = renderer.sharedMaterial;
+                    if (material == null || material.shader == null) continue;
+                    if (!material.HasProperty("_MainTex") || material.GetTexture("_MainTex") == null)
+                        continue;
+                    if (needEmission && !material.HasProperty("_EmissionColor")) continue;
+
+                    return new Surface
+                    {
+                        Material = material,
+                        Rect = UvRegion(renderer),
+                        Source = donor.name + "/" + material.name
+                    };
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// The slice of its texture a donor actually uses, measured from its largest single
+        /// triangle. Valheim's textures are atlases, so UVs running 0..1 would sample the
+        /// neighbouring tiles as well; min and max across the whole mesh would span every
+        /// tile the donor touches.
+        /// </summary>
+        private static Rect UvRegion(Renderer renderer)
+        {
+            Rect whole = new Rect(0f, 0f, 1f, 1f);
+
+            MeshFilter filter = renderer.GetComponent<MeshFilter>();
+            Mesh mesh = filter != null ? filter.sharedMesh : null;
+            if (mesh == null || !mesh.isReadable) return whole;
+
+            Vector2[] uv;
+            int[] tris;
+            try
+            {
+                uv = mesh.uv;
+                tris = mesh.triangles;
+            }
+            catch (Exception)
+            {
+                return whole;
+            }
+
+            float bestArea = 0f;
+            Rect best = whole;
+            for (int i = 0; i + 2 < tris.Length; i += 3)
+            {
+                Vector2 a = uv[tris[i]], b = uv[tris[i + 1]], c = uv[tris[i + 2]];
+                float minX = Mathf.Min(a.x, Mathf.Min(b.x, c.x)), maxX = Mathf.Max(a.x, Mathf.Max(b.x, c.x));
+                float minY = Mathf.Min(a.y, Mathf.Min(b.y, c.y)), maxY = Mathf.Max(a.y, Mathf.Max(b.y, c.y));
+                float width = maxX - minX, height = maxY - minY;
+
+                if (width <= 0.005f || height <= 0.005f || width > 1f || height > 1f) continue;
+                if (width * height <= bestArea) continue;
+
+                bestArea = width * height;
+                best = new Rect(minX, minY, width, height);
+            }
+
+            return best;
+        }
+
+        /// <summary>
+        /// Each submesh's UVs squeezed into its material's slice of the atlas, always from
+        /// the pristine coordinates so a second world does not squeeze the first one's.
+        /// Clamped, never wrapped: wrapping a vertex that crosses 1.0 makes the GPU
+        /// interpolate backwards across the whole tile.
+        /// </summary>
+        private static void Remap(Mesh mesh, Vector2[] source, Rect[] rects)
+        {
+            Vector2[] uv = (Vector2[])source.Clone();
+            bool[] done = new bool[uv.Length];
+
+            for (int i = 0; i < mesh.subMeshCount && i < rects.Length; i++)
+            {
+                Rect rect = rects[i];
+                foreach (int index in mesh.GetTriangles(i))
+                {
+                    if (done[index]) continue;
+                    done[index] = true;
+
+                    uv[index] = new Vector2(
+                        rect.x + Mathf.Clamp01(uv[index].x) * rect.width,
+                        rect.y + Mathf.Clamp01(uv[index].y) * rect.height);
+                }
+            }
+
+            mesh.uv = uv;
+        }
+
+        // ------------------------------------------------------------------ recipes
+
+        private static void PlaceRecipes(ObjectDB db, GameObject table)
+        {
+            if (Wanted.Count == 0) return;
+
+            CraftingStation station = table.GetComponent<CraftingStation>();
+            if (station == null)
+            {
+                Once("station", "The registered " + PrefabName + " has no CraftingStation.");
+                return;
+            }
+
+            foreach (Want want in Wanted) Place(db, station, want);
+        }
+
+        private static void Place(ObjectDB db, CraftingStation station, Want want)
+        {
+            ItemDrop basis = ItemOf(db, want.Base);
+            ItemDrop infusing = ItemOf(db, want.Infusing);
+            ItemDrop output = ItemOf(db, want.Output);
+
+            string key = want.Base + "+" + want.Infusing + "=" + want.Output;
+            if (basis == null || infusing == null || output == null)
+            {
+                Once("item:" + key, "Infusion recipe " + key + " skipped: no item named "
+                    + (basis == null ? want.Base : infusing == null ? want.Infusing : want.Output)
+                    + ". It is retried in case a mod registers the item later.");
+                return;
+            }
+
+            if (basis.m_itemData.m_shared.m_maxQuality > 1)
+            {
+                Once("quality:" + key, "Infusion recipe " + key + " refused: " + want.Base
+                    + " can be upgraded, and an infusion consumes it at any quality.");
+                return;
+            }
+
+            if (Exists(db, basis, infusing, output)) return;
+
+            Recipe recipe = ScriptableObject.CreateInstance<Recipe>();
+            recipe.name = "Recipe_Infusion_" + want.Output;
+            recipe.m_item = output;
+            recipe.m_amount = 1;
+            recipe.m_craftingStation = station;
+            recipe.m_resources = new[]
+            {
+                new Piece.Requirement { m_resItem = basis, m_amount = 1 },
+                new Piece.Requirement { m_resItem = infusing, m_amount = 1 }
+            };
+
+            db.m_recipes.Add(recipe);
+            Prefabs.Log.LogInfo("Infusion recipe added: " + key + ".");
+        }
+
+        /// <summary>
+        /// Whether ObjectDB already holds this infusion, whoever added it: the same output at
+        /// a table of this name, requiring both inputs. This is the whole of the "already
+        /// added" test, so it holds across worlds and across mods without a flag.
+        /// </summary>
+        private static bool Exists(ObjectDB db, ItemDrop basis, ItemDrop infusing, ItemDrop output)
+        {
+            foreach (Recipe recipe in db.m_recipes)
+            {
+                if (recipe == null || recipe.m_item != output || recipe.m_craftingStation == null
+                    || recipe.m_craftingStation.m_name != DisplayName) continue;
+
+                if (Requires(recipe, basis) && Requires(recipe, infusing)) return true;
+            }
+
+            return false;
+        }
+
+        private static bool Requires(Recipe recipe, ItemDrop item)
+        {
+            if (recipe.m_resources == null) return false;
+
+            foreach (Piece.Requirement requirement in recipe.m_resources)
+                if (requirement != null && requirement.m_resItem == item) return true;
+
+            return false;
+        }
+
+        private static ItemDrop ItemOf(ObjectDB db, string name)
+        {
+            GameObject prefab = db.GetItemPrefab(name);
+            return prefab != null ? prefab.GetComponent<ItemDrop>() : null;
+        }
+
+        // ------------------------------------------------------------------ assets
+
+        private static string AssetPath(string file)
+        {
+            return Path.Combine(Path.GetDirectoryName(typeof(InfusionTable).Assembly.Location), file);
+        }
+
+        private sealed class Model
+        {
+            internal Mesh Mesh;
+            internal string[] Groups;
+        }
+
+        /// <summary>
+        /// A Wavefront OBJ as a Mesh with one submesh per usemtl group, in file order, which
+        /// map onto the renderer's materials in the same order. Reads what Blender writes:
+        /// v, vt, vn and f in the v/vt/vn form.
+        /// </summary>
+        private static Model LoadModel(string path)
+        {
+            try
+            {
+                return Parse(File.ReadAllLines(path));
+            }
+            catch (Exception e)
+            {
+                Once("model-read", "Could not read " + path + ": " + e.Message);
+                return null;
+            }
+        }
+
+        private static Model Parse(string[] lines)
+        {
+            CultureInfo culture = CultureInfo.InvariantCulture;
+            List<Vector3> positions = new List<Vector3>(), normals = new List<Vector3>();
+            List<Vector2> uvs = new List<Vector2>();
+
+            List<string> groups = new List<string>();
+            List<List<int>> triangles = new List<List<int>>();
+            List<int> current = null;
+
+            Dictionary<string, int> interned = new Dictionary<string, int>();
+            List<Vector3> outPositions = new List<Vector3>(), outNormals = new List<Vector3>();
+            List<Vector2> outUvs = new List<Vector2>();
+
+            foreach (string raw in lines)
+            {
+                string[] parts = raw.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 2 || parts[0][0] == '#') continue;
+
+                switch (parts[0])
+                {
+                    case "v":
+                        positions.Add(new Vector3(float.Parse(parts[1], culture),
+                            float.Parse(parts[2], culture), float.Parse(parts[3], culture)));
+                        break;
+                    case "vt":
+                        uvs.Add(new Vector2(float.Parse(parts[1], culture), float.Parse(parts[2], culture)));
+                        break;
+                    case "vn":
+                        normals.Add(new Vector3(float.Parse(parts[1], culture),
+                            float.Parse(parts[2], culture), float.Parse(parts[3], culture)));
+                        break;
+                    case "usemtl":
+                        int slot = groups.IndexOf(parts[1]);
+                        if (slot < 0)
+                        {
+                            groups.Add(parts[1]);
+                            triangles.Add(new List<int>());
+                            slot = groups.Count - 1;
+                        }
+
+                        current = triangles[slot];
+                        break;
+                    case "f":
+                        if (current == null) break;
+
+                        // One flat vertex per distinct v/vt/vn corner, because the OBJ indexes
+                        // the three separately and Unity cannot.
+                        int[] corners = new int[parts.Length - 1];
+                        for (int i = 1; i < parts.Length; i++)
+                        {
+                            int index;
+                            if (!interned.TryGetValue(parts[i], out index))
+                            {
+                                string[] field = parts[i].Split('/');
+                                outPositions.Add(positions[Resolve(field[0], positions.Count)]);
+                                outUvs.Add(field.Length > 1 && field[1].Length > 0
+                                    ? uvs[Resolve(field[1], uvs.Count)] : Vector2.zero);
+                                outNormals.Add(field.Length > 2 && field[2].Length > 0
+                                    ? normals[Resolve(field[2], normals.Count)] : Vector3.up);
+                                index = outPositions.Count - 1;
+                                interned[parts[i]] = index;
+                            }
+
+                            corners[i - 1] = index;
+                        }
+
+                        // Winding as exported. Reversing it turns the model inside out.
+                        for (int i = 2; i < corners.Length; i++)
+                        {
+                            current.Add(corners[0]);
+                            current.Add(corners[i - 1]);
+                            current.Add(corners[i]);
+                        }
+
+                        break;
+                }
+            }
+
+            if (outPositions.Count == 0) throw new InvalidDataException("no geometry");
+
+            Mesh mesh = new Mesh { name = "infusion_table" };
+
+            // UInt16 indices wrap silently past 65,535 vertices and draw garbage.
+            if (outPositions.Count > 65535) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+
+            mesh.SetVertices(outPositions);
+            mesh.SetUVs(0, outUvs);
+            mesh.SetNormals(outNormals);
+            mesh.subMeshCount = groups.Count;
+            for (int i = 0; i < groups.Count; i++) mesh.SetTriangles(triangles[i], i);
+
+            mesh.RecalculateBounds();
+            mesh.RecalculateTangents();
+
+            return new Model { Mesh = mesh, Groups = groups.ToArray() };
+        }
+
+        /// <summary>OBJ indices are 1-based, and a negative one counts back from the end.</summary>
+        private static int Resolve(string text, int count)
+        {
+            int value = int.Parse(text, NumberStyles.Integer, CultureInfo.InvariantCulture);
+            return value > 0 ? value - 1 : count + value;
+        }
+
+        private static Sprite LoadIcon()
+        {
+            if (_icon != null) return _icon;
+
+            string path = AssetPath(IconFile);
+            if (!File.Exists(path))
+            {
+                Once("icon", IconFile + " is missing beside the dll (" + path
+                    + "). The Infusion Table will use the workbench's icon.");
+                return null;
+            }
+
+            try
+            {
+                Texture2D texture = new Texture2D(2, 2, TextureFormat.RGBA32, false)
+                {
+                    filterMode = FilterMode.Bilinear,
+                    wrapMode = TextureWrapMode.Clamp
+                };
+
+                if (!LoadPng(texture, File.ReadAllBytes(path))) return null;
+
+                texture.name = "infusion_table_icon";
+                texture.hideFlags = HideFlags.HideAndDontSave;
+                _icon = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height),
+                    new Vector2(0.5f, 0.5f));
+                return _icon;
+            }
+            catch (Exception e)
+            {
+                Once("icon-read", "Could not read " + path + ": " + e.Message);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Texture2D.LoadImage, by reflection. It lives in UnityEngine.ImageConversionModule,
+        /// which targets netstandard 2.1 and fails a net462 build with CS1705 if referenced.
+        /// </summary>
+        private static bool LoadPng(Texture2D texture, byte[] data)
+        {
+            Type type = AccessTools.TypeByName("UnityEngine.ImageConversion");
+            System.Reflection.MethodInfo method = type == null ? null
+                : AccessTools.Method(type, "LoadImage", new[] { typeof(Texture2D), typeof(byte[]) });
+
+            if (method == null)
+            {
+                Once("loadimage", "UnityEngine.ImageConversion.LoadImage is missing, so the "
+                    + "Infusion Table cannot read its icon.");
+                return false;
+            }
+
+            return (bool)method.Invoke(null, new object[] { texture, data });
+        }
+
+        // ------------------------------------------------------------------ complaints
+
+        /// <summary>
+        /// Say it once. Everything that complains sits inside a Tick that runs every frame,
+        /// and a missing file or item does not fix itself.
+        /// </summary>
+        private static void Once(string key, string message)
+        {
+            if (Told.Add(key)) Prefabs.Log.LogWarning(message);
+        }
+    }
+}

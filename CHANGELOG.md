@@ -7,6 +7,15 @@ and the mod uses [semantic versioning](https://semver.org).
 
 ### Added
 
+- **`shared/InfusionTable.cs`: a shared crafting station and recipe helper (LHM-91).** Linked source like
+  `Prefabs.cs`, not part of the DLL, so Core's version and build id do not change. It registers
+  `piece_ezomic_infusion`, "Infusion Table", cloned from the workbench with the model in
+  `shared/assets/`, on the Hammer, buildable beside a workbench for 10 Wood, 8 Stone and 4 Flint.
+  `InfusionTable.AddRecipe(base, infusing, output)` adds a plain vanilla recipe at it. Registration,
+  the Hammer entry and the recipes are each checked against the live world and ObjectDB rather than a
+  flag, so a second mod linking the file never double-registers and a logout and login registers
+  again. Run in game through a scratch consumer, by day and by night.
+
 - **A Settings page in the compendium (LHM-51).** One place for what a player may change without
   opening a `.cfg`: display options and hotkeys, mod by mod. A mod lists an entry with
   `SettingsPanel.Add(entry, label, group, whenItActs, summary)`, and Core draws the page. A change is

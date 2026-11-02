@@ -205,8 +205,8 @@ missing-assembly exception lands during plugin load.
 
 ### Shared source
 
-`shared/Prefabs.cs` and `shared/BiomeIndex.cs` live in this repository and are excluded from
-the DLL. Mods link them:
+`shared/Prefabs.cs`, `shared/BiomeIndex.cs` and `shared/InfusionTable.cs` live in this repository
+and are excluded from the DLL. Mods link them:
 
 ```xml
 <Compile Include="..\core\shared\Prefabs.cs" Link="shared\Prefabs.cs" />
@@ -236,7 +236,27 @@ one, which only exists inside Sunken Crypts). Earliest biome wins. `BiomeIndex.B
 is the lookup; `BiomeForKey` and `Overrides` are the delegates the host mod fills in. Yoke and
 Hirsla link it.
 
-Fixing either file means rebuilding every mod that links it.
+**`InfusionTable`** is the Infusion Table, a crafting station shared by every mod that wants to
+combine two items into a third, and a helper for the recipes that use it. It needs `Prefabs.cs`
+linked as well, and its model and icon travel beside the linking mod's DLL:
+
+```xml
+<Compile Include="..\core\shared\InfusionTable.cs" Link="shared\InfusionTable.cs" />
+<!-- in the Deploy target, next to the line that copies the DLL; the package carries them too -->
+<Copy SourceFiles="..\core\shared\assets\infusion_table.obj;..\core\shared\assets\infusion_table.png"
+      DestinationFolder="$(DeployDir)" ContinueOnError="true" />
+```
+
+`InfusionTable.AddRecipe(baseItem, infusingItem, outputItem)` once in `Awake`, `InfusionTable.Tick()`
+from `Update`. The table clones the workbench, sits on the Hammer, needs a workbench nearby to
+build, and costs 10 Wood, 8 Stone and 4 Flint. A recipe consumes both inputs and gives a fresh
+output; the base item must be one that cannot be upgraded, because the game takes any quality of
+an ingredient and nothing here carries quality over. Registration asks the live ZNetScene whether
+the prefab is already known, so two mods linking the file never double-register, and it is done
+again for every world. The prefab name `piece_ezomic_infusion` is permanent: a client that cannot
+resolve it makes ZNetScene discard every placed table without a word.
+
+Fixing any of these files means rebuilding every mod that links it.
 
 ### Listing a setting on the Settings page
 
