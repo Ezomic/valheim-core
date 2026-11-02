@@ -7,6 +7,16 @@ using UnityEngine;
 
 namespace Ezomic.Shared
 {
+    /// <summary>What fills the Infusion Table's basin, and what a recipe can ask for.</summary>
+    public enum InfusionLiquid
+    {
+        /// <summary>For a recipe: any of the three. Never what a basin holds.</summary>
+        Any,
+        Resin,
+        GreydwarfEye,
+        Guck
+    }
+
     /// <summary>
     /// The Infusion Table: one crafting station shared by every mod that wants to combine two
     /// items into a third, and a helper for adding recipes that use it.
@@ -85,9 +95,36 @@ namespace Ezomic.Shared
         /// <summary>Vanilla things whose material reads as lit, best first.</summary>
         private static readonly string[] GlowDonors = { "guard_stone", "piece_dvergr_lantern" };
 
+        private const string LiquidKey = "ezomic_infusion_liquid";
+        private const string HarmonyId = "ezomic.shared.infusiontable";
+
         private static readonly Color LiquidColour = new Color(0.35f, 0.85f, 1f);
+        private static readonly Color DryColour = new Color(0.14f, 0.12f, 0.1f);
         private const float LightRange = 3f;
         private const float LightIntensity = 1.2f;
+
+        private static Color ColourOf(InfusionLiquid liquid)
+        {
+            switch (liquid)
+            {
+                case InfusionLiquid.Resin: return new Color(1f, 0.8f, 0.15f);
+                case InfusionLiquid.GreydwarfEye: return new Color(0.3f, 0.5f, 1f);
+                case InfusionLiquid.Guck: return new Color(0.4f, 1f, 0.3f);
+                default: return LiquidColour;
+            }
+        }
+
+        private static readonly InfusionLiquid[] Fillings =
+            { InfusionLiquid.Resin, InfusionLiquid.GreydwarfEye, InfusionLiquid.Guck };
+
+        private static InfusionLiquid? LiquidOfItem(ItemDrop.ItemData item)
+        {
+            string name = item != null && item.m_dropPrefab != null ? item.m_dropPrefab.name : null;
+            foreach (InfusionLiquid liquid in Fillings)
+                if (name == liquid.ToString()) return liquid;
+
+            return null;
+        }
 
         /// <summary>Seconds between the checks that are not about ZDO safety.</summary>
         private const float HousekeepingInterval = 1f;
@@ -103,6 +140,7 @@ namespace Ezomic.Shared
         private sealed class Want
         {
             internal string Base, Infusing, Output;
+            internal InfusionLiquid Liquid;
         }
 
         private static readonly List<Want> Wanted = new List<Want>();
@@ -114,11 +152,13 @@ namespace Ezomic.Shared
         private static float _retryAt;
         private static float _nextHousekeeping;
         private static Sprite _icon;
+        private static bool _patched;
 
         // What the prefab was dressed with, so a later world can tell it needs dressing again.
         private static MeshRenderer _renderer;
-        private static Mesh _mesh;
-        private static Vector2[] _baseUv;
+        private static MeshRenderer _liquidRenderer;
+        private static Mesh _mesh, _liquidMesh;
+        private static Vector2[] _baseUv, _liquidBaseUv;
         private static string[] _groups;
         private static GameObject _woodSource, _stoneSource, _glowSource;
         private static Material _woodMaterial, _stoneMaterial, _liquidMaterial, _liquidTinted;
@@ -143,8 +183,13 @@ namespace Ezomic.Shared
         /// why the base item must be one that can only ever be quality 1. A base that can be
         /// upgraded is refused, since vanilla would take a quality 3 sword as readily as a
         /// quality 1 one and nothing here carries quality over.
+        ///
+        /// The basin must be filled for the recipe to be craftable, and each craft empties it.
+        /// <paramref name="liquid"/> says with what: the default accepts any of the three,
+        /// a named one only that.
         /// </summary>
-        public static void AddRecipe(string baseItem, string infusingItem, string outputItem)
+        public static void AddRecipe(string baseItem, string infusingItem, string outputItem,
+            InfusionLiquid liquid = InfusionLiquid.Any)
         {
             if (string.IsNullOrEmpty(baseItem) || string.IsNullOrEmpty(infusingItem)
                 || string.IsNullOrEmpty(outputItem))
@@ -157,9 +202,12 @@ namespace Ezomic.Shared
 
             foreach (Want existing in Wanted)
                 if (existing.Base == baseItem && existing.Infusing == infusingItem
-                    && existing.Output == outputItem) return;
+                    && existing.Output == outputItem && existing.Liquid == liquid) return;
 
-            Wanted.Add(new Want { Base = baseItem, Infusing = infusingItem, Output = outputItem });
+            Wanted.Add(new Want
+            {
+                Base = baseItem, Infusing = infusingItem, Output = outputItem, Liquid = liquid
+            });
         }
 
         /// <summary>
@@ -172,6 +220,8 @@ namespace Ezomic.Shared
             ZNetScene scene = ZNetScene.instance;
             ObjectDB db = ObjectDB.instance;
             if (scene == null || !HasItems(db)) return;
+
+            if (!_patched) Patch();
 
             // Every frame and never throttled: this is the call that stops ZNetScene from
             // discarding a placed table, and the sooner it lands the fewer ZDOs are asked
@@ -371,6 +421,9 @@ namespace Ezomic.Shared
             _mesh = model.Mesh;
             _baseUv = model.Mesh.uv;
             _groups = model.Groups;
+            _liquidMesh = model.Liquid;
+            _liquidBaseUv = model.Liquid != null ? model.Liquid.uv : null;
+            _liquidRenderer = null;
             _woodSource = _stoneSource = _glowSource = null;
             _woodMaterial = _stoneMaterial = _liquidMaterial = null;
 
@@ -381,41 +434,41 @@ namespace Ezomic.Shared
             box.center = model.Mesh.bounds.center;
             box.size = model.Mesh.bounds.size;
 
+            // Hover and use land on this collider, so the basin component goes with it: it is
+            // the table's Interactable, and hands a plain interact on to the CraftingStation.
+            collision.AddComponent<InfusionBasin>();
+
+            GameObject liquid = null;
+            if (model.Liquid != null)
+            {
+                liquid = new GameObject("infusion_liquid");
+                liquid.transform.SetParent(clone.transform, false);
+                liquid.layer = clone.layer;
+                liquid.AddComponent<MeshFilter>().sharedMesh = model.Liquid;
+                _liquidRenderer = liquid.AddComponent<MeshRenderer>();
+                _liquidRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            }
+
             // WearNTear switches between its three look objects as health falls and does not
             // check that they exist. All three pointing at one object keeps it from ever
             // dereferencing one that is gone, and the table has no worn or broken state.
             WearNTear wear = clone.GetComponent<WearNTear>();
             if (wear != null) wear.m_new = wear.m_worn = wear.m_broken = visual;
 
-            AttachLight(visual.transform, model);
+            if (liquid != null) AttachLight(liquid.transform, model.Liquid);
         }
 
         /// <summary>
-        /// A point light at the basin. Vanilla paints its emission into a texture, so a plain
-        /// colour on a borrowed material will not glow, and writing to a shared material
-        /// would recolour everything else that wears it. The light is what lights the room.
+        /// A point light at the basin, a child of the liquid so that hiding the liquid hides
+        /// the light too. Vanilla paints its emission into a texture, so a plain colour on a
+        /// borrowed material will not glow, and writing to a shared material would recolour
+        /// everything else that wears it. The light is what lights the room.
         /// </summary>
-        private static void AttachLight(Transform visual, Model model)
+        private static void AttachLight(Transform liquid, Mesh mesh)
         {
-            int slot = Array.FindIndex(model.Groups,
-                g => string.Equals(g, "liquid", StringComparison.OrdinalIgnoreCase));
-            if (slot < 0) return;
-
-            int[] triangles = model.Mesh.GetTriangles(slot);
-            if (triangles.Length == 0) return;
-
-            Vector3[] vertices = model.Mesh.vertices;
-            Vector3 min = vertices[triangles[0]];
-            Vector3 max = min;
-            foreach (int index in triangles)
-            {
-                min = Vector3.Min(min, vertices[index]);
-                max = Vector3.Max(max, vertices[index]);
-            }
-
             GameObject anchor = new GameObject("infusion_light");
-            anchor.transform.SetParent(visual, false);
-            anchor.transform.localPosition = (min + max) * 0.5f + Vector3.up * 0.1f;
+            anchor.transform.SetParent(liquid, false);
+            anchor.transform.localPosition = mesh.bounds.center + Vector3.up * 0.1f;
 
             Light light = anchor.AddComponent<Light>();
             light.type = LightType.Point;
@@ -461,22 +514,25 @@ namespace Ezomic.Shared
 
             Material[] materials = new Material[_groups.Length];
             Rect[] rects = new Rect[_groups.Length];
-            // The game's own copies of a prefab carry no property block from this one, so the
-            // tint lives on a material of our own, copied from the donor, which is never written.
-            if (_liquidTinted != null) UnityEngine.Object.Destroy(_liquidTinted);
-            _liquidTinted = new Material(liquidSurface.Material) { name = "infusion_liquid" };
-            _liquidTinted.SetColor("_Color", LiquidColour);
-            _liquidTinted.SetColor("_EmissionColor", LiquidColour * 2f);
-
             for (int i = 0; i < _groups.Length; i++)
             {
-                Surface surface = SurfaceFor(_groups[i], woodSurface, stoneSurface, liquidSurface);
-                materials[i] = IsLiquid(_groups[i]) ? _liquidTinted : surface.Material;
+                Surface surface = SurfaceFor(_groups[i], woodSurface, stoneSurface);
+                materials[i] = surface.Material;
                 rects[i] = surface.Rect;
             }
 
             _renderer.sharedMaterials = materials;
             Remap(_mesh, _baseUv, rects);
+
+            if (_liquidMesh != null && _liquidRenderer != null)
+            {
+                // A material of our own, copied from the donor, which is never written. Each
+                // placed table copies this again and tints that, so two tables can differ.
+                if (_liquidTinted != null) UnityEngine.Object.Destroy(_liquidTinted);
+                _liquidTinted = new Material(liquidSurface.Material) { name = "infusion_liquid" };
+                _liquidRenderer.sharedMaterial = _liquidTinted;
+                Remap(_liquidMesh, _liquidBaseUv, new[] { liquidSurface.Rect });
+            }
 
             _woodSource = wood;
             _stoneSource = stone;
@@ -502,9 +558,8 @@ namespace Ezomic.Shared
             return string.Equals(group, "liquid", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static Surface SurfaceFor(string group, Surface wood, Surface stone, Surface liquid)
+        private static Surface SurfaceFor(string group, Surface wood, Surface stone)
         {
-            if (IsLiquid(group)) return liquid;
             return string.Equals(group, "stone", StringComparison.OrdinalIgnoreCase) ? stone : wood;
         }
 
@@ -661,10 +716,11 @@ namespace Ezomic.Shared
                 return;
             }
 
-            if (Exists(db, basis, infusing, output)) return;
+            string name = RecipeName(want.Output, want.Liquid);
+            if (Exists(db, basis, infusing, output, name)) return;
 
             Recipe recipe = ScriptableObject.CreateInstance<Recipe>();
-            recipe.name = "Recipe_Infusion_" + want.Output;
+            recipe.name = name;
             recipe.m_item = output;
             recipe.m_amount = 1;
             recipe.m_craftingStation = station;
@@ -680,15 +736,17 @@ namespace Ezomic.Shared
 
         /// <summary>
         /// Whether ObjectDB already holds this infusion, whoever added it: the same output at
-        /// a table of this name, requiring both inputs. This is the whole of the "already
-        /// added" test, so it holds across worlds and across mods without a flag.
+        /// a table of this name, requiring both inputs and the same liquid. This is the whole
+        /// of the "already added" test, so it holds across worlds and across mods without a
+        /// flag.
         /// </summary>
-        private static bool Exists(ObjectDB db, ItemDrop basis, ItemDrop infusing, ItemDrop output)
+        private static bool Exists(ObjectDB db, ItemDrop basis, ItemDrop infusing, ItemDrop output,
+            string name)
         {
             foreach (Recipe recipe in db.m_recipes)
             {
                 if (recipe == null || recipe.m_item != output || recipe.m_craftingStation == null
-                    || recipe.m_craftingStation.m_name != DisplayName) continue;
+                    || recipe.m_craftingStation.m_name != DisplayName || recipe.name != name) continue;
 
                 if (Requires(recipe, basis) && Requires(recipe, infusing)) return true;
             }
@@ -712,6 +770,238 @@ namespace Ezomic.Shared
             return prefab != null ? prefab.GetComponent<ItemDrop>() : null;
         }
 
+        // ------------------------------------------------------------------ the basin
+
+        private static string RecipeName(string output, InfusionLiquid liquid)
+        {
+            return "Recipe_Infusion_" + output + "@" + liquid;
+        }
+
+        /// <summary>
+        /// The liquid an infusion recipe asks for, read back off its name, or null for any
+        /// other recipe. The name is the only place it is kept, so a patch in one linking mod
+        /// still reads the recipes another linking mod added.
+        /// </summary>
+        private static InfusionLiquid? NeededBy(Recipe recipe)
+        {
+            if (recipe == null || recipe.name == null || !recipe.name.StartsWith("Recipe_Infusion_"))
+                return null;
+
+            int at = recipe.name.LastIndexOf('@');
+            InfusionLiquid liquid;
+            return at > 0 && Enum.TryParse(recipe.name.Substring(at + 1), out liquid)
+                ? liquid : (InfusionLiquid?)null;
+        }
+
+        private static string Held(CraftingStation station)
+        {
+            ZNetView view = station != null ? station.GetComponentInParent<ZNetView>() : null;
+            return view != null && view.IsValid() ? view.GetZDO().GetString(LiquidKey, "") : "";
+        }
+
+        private static void Drain(CraftingStation station)
+        {
+            ZNetView view = station.GetComponentInParent<ZNetView>();
+            if (view == null || !view.IsValid()) return;
+
+            view.ClaimOwnership();
+            view.GetZDO().Set(LiquidKey, "");
+        }
+
+        /// <summary>
+        /// Two postfixes, applied once however many linked mods carry this file: whoever ticks
+        /// first patches, and the rest see its patch on the method and leave it alone. Nothing
+        /// they read lives in a static, so it does not matter whose copy that was.
+        /// </summary>
+        private static void Patch()
+        {
+            _patched = true;
+
+            try
+            {
+                Harmony harmony = new Harmony(HarmonyId);
+                PatchOnce(harmony, AccessTools.Method(typeof(Player), "HaveRequirements",
+                    new[] { typeof(Recipe), typeof(bool), typeof(int), typeof(int) }),
+                    nameof(GateByLiquid));
+                PatchOnce(harmony, AccessTools.Method(typeof(Player), "ConsumeResources"),
+                    nameof(EmptyBasinOnCraft));
+            }
+            catch (Exception e)
+            {
+                Prefabs.Log.LogError("Patching for the Infusion Table's liquid failed, so recipes "
+                    + "will not need it: " + e);
+            }
+        }
+
+        private static void PatchOnce(Harmony harmony, System.Reflection.MethodBase original,
+            string postfix)
+        {
+            if (original == null)
+            {
+                Prefabs.Log.LogError("A Player method the Infusion Table patches is missing ("
+                    + postfix + "). Recipes will not need the liquid.");
+                return;
+            }
+
+            HarmonyLib.Patches info = Harmony.GetPatchInfo(original);
+            if (info != null)
+                foreach (HarmonyLib.Patch patch in info.Postfixes)
+                    if (patch.owner == HarmonyId) return;
+
+            harmony.Patch(original, postfix: new HarmonyMethod(typeof(InfusionTable), postfix));
+        }
+
+        private static void GateByLiquid(Player __instance, Recipe recipe, bool discover,
+            ref bool __result)
+        {
+            if (!__result || discover) return;
+
+            InfusionLiquid? needed = NeededBy(recipe);
+            if (needed == null) return;
+
+            string held = Held(__instance.GetCurrentCraftingStation());
+            InfusionLiquid liquid;
+            __result = held != "" && Enum.TryParse(held, out liquid)
+                && (needed == InfusionLiquid.Any || liquid == needed);
+        }
+
+        private static void EmptyBasinOnCraft(Player __instance, Piece.Requirement[] requirements)
+        {
+            CraftingStation station = __instance.GetCurrentCraftingStation();
+            ObjectDB db = ObjectDB.instance;
+            if (station == null || db == null || Held(station) == "") return;
+
+            foreach (Recipe recipe in db.m_recipes)
+            {
+                if (recipe == null || recipe.m_resources != requirements || NeededBy(recipe) == null)
+                    continue;
+
+                Drain(station);
+                return;
+            }
+        }
+
+        /// <summary>
+        /// What a placed table does that the CraftingStation does not: it shows what the
+        /// basin holds, and takes a use of Resin, a Greydwarf Eye or Guck to fill it. It sits
+        /// on the collider the player aims at, so it is the table's Interactable, and passes
+        /// everything else on to the station. The liquid is a string on the table's ZDO, so
+        /// it is saved with the world and every player sees the same basin.
+        /// </summary>
+        private sealed class InfusionBasin : MonoBehaviour, Interactable, Hoverable
+        {
+            private ZNetView _view;
+            private CraftingStation _station;
+            private GameObject _liquid;
+            private Renderer _renderer;
+            private Light _light;
+            private Material _material;
+            private string _shown;
+            private float _nextCheck;
+
+            private void Awake()
+            {
+                _view = GetComponentInParent<ZNetView>();
+                _station = GetComponentInParent<CraftingStation>();
+
+                Transform liquid = _view != null ? _view.transform.Find("infusion_liquid") : null;
+                if (liquid == null) return;
+
+                _liquid = liquid.gameObject;
+                _renderer = liquid.GetComponent<Renderer>();
+                _light = liquid.GetComponentInChildren<Light>(true);
+                if (_renderer != null) _material = _renderer.material;
+            }
+
+            private void OnDestroy()
+            {
+                if (_material != null) Destroy(_material);
+            }
+
+            private void Update()
+            {
+                if (Time.time < _nextCheck) return;
+                _nextCheck = Time.time + 0.25f;
+
+                Show(Held(_station));
+            }
+
+            private void Show(string held)
+            {
+                if (held == _shown) return;
+                _shown = held;
+                if (_liquid == null) return;
+
+                // An empty basin still shows its floor, dark and dull, because the model's
+                // basin is open to the pedestal below without it.
+                bool full = held != "";
+                InfusionLiquid liquid;
+                Color colour = !full ? DryColour
+                    : Enum.TryParse(held, out liquid) ? ColourOf(liquid) : LiquidColour;
+
+                if (_material != null)
+                {
+                    if (_material.HasProperty("_Color")) _material.SetColor("_Color", colour);
+                    if (_material.HasProperty("_EmissionColor"))
+                    {
+                        // The donor's emission map is orange and would turn every colour orange.
+                        _material.SetTexture("_EmissionMap", null);
+                        _material.EnableKeyword("_EMISSION");
+                        _material.SetColor("_EmissionColor", full ? colour * 0.45f : Color.black);
+                    }
+                }
+
+                if (_light == null) return;
+                _light.enabled = full;
+                _light.color = colour;
+            }
+
+            public bool Interact(Humanoid user, bool hold, bool alt)
+            {
+                return _station != null && _station.Interact(user, hold, alt);
+            }
+
+            public bool UseItem(Humanoid user, ItemDrop.ItemData item)
+            {
+                InfusionLiquid? liquid = LiquidOfItem(item);
+                if (liquid == null) return _station != null && _station.UseItem(user, item);
+                if (_view == null || !_view.IsValid()) return false;
+
+                if (Held(_station) != "")
+                {
+                    user.Message(MessageHud.MessageType.Center, "The basin is already full.");
+                    return true;
+                }
+
+                if (!user.GetInventory().RemoveOneItem(item)) return false;
+
+                _view.ClaimOwnership();
+                _view.GetZDO().Set(LiquidKey, liquid.Value.ToString());
+                user.Message(MessageHud.MessageType.Center, "You fill the basin.");
+                return true;
+            }
+
+            public string GetHoverText()
+            {
+                string held = Held(_station);
+                string status = held == ""
+                    ? "Empty basin. Use Resin, a Greydwarf Eye or Guck on it to fill it."
+                    : "The basin holds " + (held == "GreydwarfEye" ? "a Greydwarf Eye" : held) + ".";
+
+                return (_station != null ? _station.GetHoverText() : "") + "\n" + status;
+            }
+
+            public string GetHoverName()
+            {
+                return _station != null ? _station.GetHoverName() : DisplayName;
+            }
+
+            public float GetHoverOffset()
+            {
+                return _station != null ? _station.GetHoverOffset() : 0f;
+            }
+        }
+
         // ------------------------------------------------------------------ assets
 
         private static string AssetPath(string file)
@@ -721,7 +1011,7 @@ namespace Ezomic.Shared
 
         private sealed class Model
         {
-            internal Mesh Mesh;
+            internal Mesh Mesh, Liquid;
             internal string[] Groups;
         }
 
@@ -824,7 +1114,57 @@ namespace Ezomic.Shared
 
             if (outPositions.Count == 0) throw new InvalidDataException("no geometry");
 
-            Mesh mesh = new Mesh { name = "infusion_table" };
+            // The liquid is its own mesh so a table with an empty basin can simply not draw it.
+            int liquidSlot = groups.FindIndex(IsLiquid);
+            List<string> bodyGroups = new List<string>();
+            List<List<int>> bodyTriangles = new List<List<int>>();
+            for (int i = 0; i < groups.Count; i++)
+            {
+                if (i == liquidSlot) continue;
+                bodyGroups.Add(groups[i]);
+                bodyTriangles.Add(triangles[i]);
+            }
+
+            return new Model
+            {
+                Mesh = Assemble("infusion_table", outPositions, outUvs, outNormals, bodyTriangles),
+                Groups = bodyGroups.ToArray(),
+                Liquid = liquidSlot < 0 ? null : Assemble("infusion_liquid", outPositions, outUvs,
+                    outNormals, new List<List<int>> { triangles[liquidSlot] })
+            };
+        }
+
+        /// <summary>One Mesh from the vertices its triangles actually use, one submesh per list.</summary>
+        private static Mesh Assemble(string name, List<Vector3> positions, List<Vector2> uvs,
+            List<Vector3> normals, List<List<int>> triangles)
+        {
+            Dictionary<int, int> remap = new Dictionary<int, int>();
+            List<Vector3> outPositions = new List<Vector3>(), outNormals = new List<Vector3>();
+            List<Vector2> outUvs = new List<Vector2>();
+            List<List<int>> outTriangles = new List<List<int>>();
+
+            foreach (List<int> list in triangles)
+            {
+                List<int> mapped = new List<int>(list.Count);
+                foreach (int index in list)
+                {
+                    int to;
+                    if (!remap.TryGetValue(index, out to))
+                    {
+                        to = outPositions.Count;
+                        remap[index] = to;
+                        outPositions.Add(positions[index]);
+                        outUvs.Add(uvs[index]);
+                        outNormals.Add(normals[index]);
+                    }
+
+                    mapped.Add(to);
+                }
+
+                outTriangles.Add(mapped);
+            }
+
+            Mesh mesh = new Mesh { name = name };
 
             // UInt16 indices wrap silently past 65,535 vertices and draw garbage.
             if (outPositions.Count > 65535) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
@@ -832,13 +1172,12 @@ namespace Ezomic.Shared
             mesh.SetVertices(outPositions);
             mesh.SetUVs(0, outUvs);
             mesh.SetNormals(outNormals);
-            mesh.subMeshCount = groups.Count;
-            for (int i = 0; i < groups.Count; i++) mesh.SetTriangles(triangles[i], i);
+            mesh.subMeshCount = outTriangles.Count;
+            for (int i = 0; i < outTriangles.Count; i++) mesh.SetTriangles(outTriangles[i], i);
 
             mesh.RecalculateBounds();
             mesh.RecalculateTangents();
-
-            return new Model { Mesh = mesh, Groups = groups.ToArray() };
+            return mesh;
         }
 
         /// <summary>OBJ indices are 1-based, and a negative one counts back from the end.</summary>

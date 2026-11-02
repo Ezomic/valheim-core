@@ -7,6 +7,14 @@ and the mod uses [semantic versioning](https://semver.org).
 
 ### Added
 
+- **The Infusion Table basin starts empty and is filled with Resin, a Greydwarf Eye or Guck (LHM-94).**
+  Using one of the three on the table fills the basin (amber, blue or green, with a matching glow),
+  one item per fill, and a recipe is only craftable while the basin holds the liquid it names.
+  `InfusionTable.AddRecipe` gains an optional `InfusionLiquid liquid` argument, `Any` by default.
+  **Behaviour change for existing callers:** a recipe added with the old three arguments now needs
+  some liquid in the basin, where it was craftable at once before. Each craft empties the basin. The
+  liquid is saved on the table's ZDO. Run in game through a scratch consumer, by day and by night.
+
 - **`shared/InfusionTable.cs`: a shared crafting station and recipe helper (LHM-91).** Linked source like
   `Prefabs.cs`, not part of the DLL, so Core's version and build id do not change. It registers
   `piece_ezomic_infusion`, "Infusion Table", cloned from the workbench with the model in
