@@ -247,11 +247,18 @@ linked as well, and its model and icon travel beside the linking mod's DLL:
       DestinationFolder="$(DeployDir)" ContinueOnError="true" />
 ```
 
-`InfusionTable.AddRecipe(baseItem, infusingItem, outputItem)` once in `Awake`, `InfusionTable.Tick()`
-from `Update`. The table clones the workbench, sits on the Hammer, needs a workbench nearby to
-build, and costs 10 Wood, 8 Stone and 4 Flint. A recipe consumes both inputs and gives a fresh
-output; the base item must be one that cannot be upgraded, because the game takes any quality of
-an ingredient and nothing here carries quality over. Registration asks the live ZNetScene whether
+`InfusionTable.AddRecipe(baseItem, infusingItem, outputItem, liquid)` once in `Awake`,
+`InfusionTable.Tick()` from `Update`. The table clones the workbench, sits on the Hammer, needs a
+workbench nearby to build, and costs 10 Wood, 8 Stone and 4 Flint. A recipe consumes both inputs and
+gives a fresh output; the base item must be one that cannot be upgraded, because the game takes any
+quality of an ingredient and nothing here carries quality over.
+
+The basin starts empty. A player fills it by using Resin (amber), a Greydwarf Eye (blue) or Guck
+(green) on the table, one item per fill, and a recipe is only craftable while the basin holds its
+`InfusionLiquid`; the default, `InfusionLiquid.Any`, takes any of the three. Each craft empties the
+basin again. The liquid is a string on the table's ZDO, so it is saved with the world and shared
+with every player. This needs two Harmony postfixes on `Player` (`HaveRequirements`, `ConsumeResources`),
+applied once however many linked mods carry the file. Registration asks the live ZNetScene whether
 the prefab is already known, so two mods linking the file never double-register, and it is done
 again for every world. The prefab name `piece_ezomic_infusion` is permanent: a client that cannot
 resolve it makes ZNetScene discard every placed table without a word.
