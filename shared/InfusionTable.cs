@@ -121,7 +121,7 @@ namespace Ezomic.Shared
         private static Vector2[] _baseUv;
         private static string[] _groups;
         private static GameObject _woodSource, _stoneSource, _glowSource;
-        private static Material _woodMaterial, _stoneMaterial, _liquidMaterial;
+        private static Material _woodMaterial, _stoneMaterial, _liquidMaterial, _liquidTinted;
 
         // ------------------------------------------------------------------ public
 
@@ -461,16 +461,18 @@ namespace Ezomic.Shared
 
             Material[] materials = new Material[_groups.Length];
             Rect[] rects = new Rect[_groups.Length];
-            MaterialPropertyBlock tint = new MaterialPropertyBlock();
-            tint.SetColor("_Color", LiquidColour);
-            tint.SetColor("_EmissionColor", LiquidColour * 2f);
+            // The game's own copies of a prefab carry no property block from this one, so the
+            // tint lives on a material of our own, copied from the donor, which is never written.
+            if (_liquidTinted != null) UnityEngine.Object.Destroy(_liquidTinted);
+            _liquidTinted = new Material(liquidSurface.Material) { name = "infusion_liquid" };
+            _liquidTinted.SetColor("_Color", LiquidColour);
+            _liquidTinted.SetColor("_EmissionColor", LiquidColour * 2f);
 
             for (int i = 0; i < _groups.Length; i++)
             {
                 Surface surface = SurfaceFor(_groups[i], woodSurface, stoneSurface, liquidSurface);
-                materials[i] = surface.Material;
+                materials[i] = IsLiquid(_groups[i]) ? _liquidTinted : surface.Material;
                 rects[i] = surface.Rect;
-                _renderer.SetPropertyBlock(IsLiquid(_groups[i]) ? tint : null, i);
             }
 
             _renderer.sharedMaterials = materials;
