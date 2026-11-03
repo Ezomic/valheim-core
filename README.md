@@ -288,13 +288,12 @@ slot, heading, body text and tab button, so there is no art of its own. The craf
 multi-craft key does nothing at this table. The slots are one player's own choice and live in that client;
 the only shared state is the liquid on the ZDO, and Empty basin writes it the same way a fill does (claim
 the ZDO, then set), so anyone in range can use the table at once and the last write wins. The window closes
-when the table is out of reach or gone. Four Harmony patches (`InventoryGui.UpdateRecipe`,
+when the table is out of reach or gone. Four patched methods (`InventoryGui.UpdateRecipe`,
 `OnCraftPressed`, `Hide` and `Humanoid.UseItem`) are applied once however many linked mods carry the file,
 and a failure in any of them switches the window off for the session and leaves vanilla's showing.
-`InfusionTable.WindowState()` reads the window as `key=value` text for a scenario. Controllers keep
-vanilla's behaviour where it carries over: the Craft button is vanilla's own, but placing items is by
-right click, which a pad reaches through the inventory's use button, and there is no pad design beyond
-that.
+`InfusionTable.WindowState()` reads the window as `key=value` text for a scenario. Mouse and
+keyboard come first: the Craft button is vanilla's own, but there is no pad design and placing items
+by gamepad has not been tried.
 
 Fixing any of these files means rebuilding every mod that links it.
 

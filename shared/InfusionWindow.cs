@@ -184,14 +184,7 @@ namespace Ezomic.Shared
                 if (station == null) return true;
 
                 Recipe wanted = Chosen(Held(station));
-                if (wanted == null)
-                {
-                    Player.m_localPlayer.Message(MessageHud.MessageType.Center,
-                        _slotBase == "" || _slotInfusing == ""
-                            ? "Place an item in both slots first."
-                            : "Those two do not infuse into anything.");
-                    return false;
-                }
+                if (wanted == null) return false;
 
                 if (SelectedRecipe(__instance) != wanted) Select(__instance, wanted);
                 return SelectedRecipe(__instance) == wanted;
@@ -226,7 +219,7 @@ namespace Ezomic.Shared
                     || OpenTable() == null) return true;
 
                 Player player = Player.m_localPlayer;
-                if (inventory != player.GetInventory()) return true;
+                if (inventory != player.GetInventory() || Crafting()) return true;
 
                 return !PlaceInSlot(item);
             }
@@ -235,6 +228,17 @@ namespace Ezomic.Shared
                 FailWindow(e);
                 return true;
             }
+        }
+
+        /// <summary>
+        /// Whether vanilla's craft timer is running. The recipe is fixed when Infuse is pressed,
+        /// so a slot or the basin changed in those seconds would end the craft with nothing made.
+        /// </summary>
+        private static bool Crafting()
+        {
+            FieldInfo timer = AccessTools.Field(typeof(InventoryGui), "m_craftTimer");
+            return timer != null && InventoryGui.instance != null
+                && (float)timer.GetValue(InventoryGui.instance) >= 0f;
         }
 
         private static void FailWindow(Exception e)
@@ -365,13 +369,7 @@ namespace Ezomic.Shared
         private static bool EmptyBasin(Player player, CraftingStation station)
         {
             ZNetView view = station != null ? station.GetComponentInParent<ZNetView>() : null;
-            if (view == null || !view.IsValid() || !station.InUseDistance(player)) return false;
-
-            if (Held(station) == "")
-            {
-                player.Message(MessageHud.MessageType.Center, "The basin is already empty.");
-                return false;
-            }
+            if (view == null || !view.IsValid() || Held(station) == "" || Crafting()) return false;
 
             view.ClaimOwnership();
             view.GetZDO().Set(LiquidKey, "");
@@ -454,6 +452,8 @@ namespace Ezomic.Shared
                 }
             }
 
+            if (index < 0 && SelectedRecipe(gui) == null) return;
+
             _setRecipe.Invoke(gui, new object[] { index, false });
         }
 
@@ -467,11 +467,6 @@ namespace Ezomic.Shared
             internal UITooltip Tooltip;
         }
 
-        private sealed class Concealed
-        {
-            internal CanvasGroup Group;
-        }
-
         private sealed class WindowView
         {
             internal InventoryGui Gui;
@@ -480,8 +475,8 @@ namespace Ezomic.Shared
             internal TMP_Text Name, Body, Basin, Status;
             internal Image Swatch;
             internal Button Empty;
-            internal readonly List<Concealed> Hidden = new List<Concealed>();
-            internal Vector2 FramePosition, FrameSize;
+            internal readonly List<CanvasGroup> Hidden = new List<CanvasGroup>();
+            internal Vector2 FrameSize;
             internal bool Shown;
             internal Recipe Described;
         }
@@ -495,6 +490,21 @@ namespace Ezomic.Shared
             WindowView view = new WindowView { Gui = gui, Frame = frame };
 
             GameObject root = new GameObject(WindowRoot, typeof(RectTransform));
+            try
+            {
+                Fill(view, gui, frame, root);
+            }
+            catch
+            {
+                UnityEngine.Object.Destroy(root);
+                throw;
+            }
+
+            return view;
+        }
+
+        private static void Fill(WindowView view, InventoryGui gui, RectTransform frame, GameObject root)
+        {
             root.layer = frame.gameObject.layer;
             view.Root = (RectTransform)root.transform;
             view.Root.SetParent(frame, false);
@@ -528,8 +538,6 @@ namespace Ezomic.Shared
 
             view.Status = Text(view, gui.m_recipeDecription, "infusion_status", 17f, TextAlignmentOptions.Top);
             Place(view.Status.rectTransform, new Vector2(0f, -405f), new Vector2(500f, 56f), 1f);
-
-            return view;
         }
 
         private static void Place(RectTransform rect, Vector2 position, Vector2 size, float pivotY = 0.5f)
@@ -595,6 +603,8 @@ namespace Ezomic.Shared
                 bool isBase = name == "infusion_base";
                 button.onClick.AddListener(() =>
                 {
+                    if (Crafting()) return;
+
                     if (isBase) _slotBase = ""; else _slotInfusing = "";
                 });
             }
@@ -645,7 +655,7 @@ namespace Ezomic.Shared
             CanvasGroup group = part.GetComponent<CanvasGroup>();
             if (group == null) group = part.gameObject.AddComponent<CanvasGroup>();
 
-            view.Hidden.Add(new Concealed { Group = group });
+            view.Hidden.Add(group);
         }
 
         private static void OpenWindow(WindowView view)
@@ -654,6 +664,10 @@ namespace Ezomic.Shared
 
             InventoryGui gui = view.Gui;
             Transform crafting = view.Frame.parent;
+
+            // The tabs are hidden below, so an Upgrade tab left selected at a workbench would
+            // stay selected and list no infusion.
+            if (!gui.InCraftTab()) gui.OnTabCraftPressed();
 
             Conceal(view, gui.m_recipeIcon.transform);
             Conceal(view, gui.m_recipeName.transform);
@@ -669,15 +683,14 @@ namespace Ezomic.Shared
             Conceal(view, crafting.Find("RepairButton"));
             Conceal(view, gui.m_repairPanel);
 
-            foreach (Concealed part in view.Hidden)
+            foreach (CanvasGroup group in view.Hidden)
             {
-                part.Group.alpha = 0f;
-                part.Group.interactable = false;
-                part.Group.blocksRaycasts = false;
+                group.alpha = 0f;
+                group.interactable = false;
+                group.blocksRaycasts = false;
             }
 
             // The recipe list is gone, so the description takes the whole width.
-            view.FramePosition = view.Frame.anchoredPosition;
             view.FrameSize = view.Frame.sizeDelta;
             view.Frame.sizeDelta = new Vector2(view.FrameSize.x + 196f, view.FrameSize.y);
 
@@ -695,18 +708,17 @@ namespace Ezomic.Shared
 
             _view = null;
 
-            foreach (Concealed part in view.Hidden)
+            foreach (CanvasGroup group in view.Hidden)
             {
-                if (part.Group == null) continue;
+                if (group == null) continue;
 
-                part.Group.alpha = 1f;
-                part.Group.interactable = true;
-                part.Group.blocksRaycasts = true;
+                group.alpha = 1f;
+                group.interactable = true;
+                group.blocksRaycasts = true;
             }
 
             if (view.Shown && view.Frame != null)
             {
-                view.Frame.anchoredPosition = view.FramePosition;
                 view.Frame.sizeDelta = view.FrameSize;
             }
 
@@ -728,7 +740,9 @@ namespace Ezomic.Shared
             view.Swatch.color = held == "" ? DryColour : known ? ColourOf(liquid) : LiquidColour;
             view.Empty.interactable = held != "";
 
-            view.Status.text = StatusLine(wanted, held);
+            view.Status.text = wanted != null && SelectedRecipe(gui) != wanted
+                ? "<color=orange>You do not know how to make this yet.</color>"
+                : StatusLine(wanted, held);
 
             TMP_Text craft = gui.m_craftButton.GetComponentInChildren<TMP_Text>();
             if (craft != null) craft.text = InfuseLabel;

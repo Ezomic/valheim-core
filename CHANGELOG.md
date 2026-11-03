@@ -16,7 +16,7 @@ and the mod uses [semantic versioning](https://semver.org).
   before. Multiplayer: the slots are each player's own, the liquid stays on the ZDO, anyone can use the table
   and the last write wins. **Linking is optional and additive:** a consumer that does not link the new file
   compiles and shows the vanilla window as before; one that does needs a `Compile` line for it and the Unity
-  UI, TextMeshPro and `assembly_guiutils` references (see the README). Four Harmony patches, applied once per
+  UI, TextMeshPro and `assembly_guiutils` references (see the README). Four patched methods, applied once per
   process; a failure switches the window off for the session and leaves vanilla's. Holding the multi-craft key
   no longer multiplies an infusion. Run in game through Hausi's `hausi-infusion-table` scenario.
 
