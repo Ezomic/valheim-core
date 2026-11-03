@@ -7,6 +7,19 @@ and the mod uses [semantic versioning](https://semver.org).
 
 ### Added
 
+- **The Infusion Table has its own window (LHM-95).** `shared/InfusionWindow.cs`, the second half of the
+  `InfusionTable` partial class, replaces the workbench's recipe list at this table only: a base slot and an
+  infusing slot, the basin's liquid, a preview of the result, an Infuse button and a new **Empty basin**
+  button, so a wrong fill no longer blocks recipes. Items go in by right click in the inventory and come out
+  by clicking the slot. It is vanilla's crafting panel rearranged and built from clones of vanilla's own slot,
+  text and button, not new art, and the craft itself is still vanilla's, so cost and liquid rules are as
+  before. Multiplayer: the slots are each player's own, the liquid stays on the ZDO, anyone can use the table
+  and the last write wins. **Linking is optional and additive:** a consumer that does not link the new file
+  compiles and shows the vanilla window as before; one that does needs a `Compile` line for it and the Unity
+  UI, TextMeshPro and `assembly_guiutils` references (see the README). Four Harmony patches, applied once per
+  process; a failure switches the window off for the session and leaves vanilla's. Holding the multi-craft key
+  no longer multiplies an infusion. Run in game through Hausi's `hausi-infusion-table` scenario.
+
 - **The Infusion Table basin starts empty and is filled with Resin, a Greydwarf Eye or Guck (LHM-94).**
   Using one of the three on the table fills the basin (amber, blue or green, with a matching glow),
   one item per fill, and a recipe is only craftable while the basin holds the liquid it names.

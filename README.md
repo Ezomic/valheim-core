@@ -205,7 +205,7 @@ missing-assembly exception lands during plugin load.
 
 ### Shared source
 
-`shared/Prefabs.cs`, `shared/BiomeIndex.cs` and `shared/InfusionTable.cs` live in this repository
+`shared/Prefabs.cs`, `shared/BiomeIndex.cs`, `shared/InfusionTable.cs` and `shared/InfusionWindow.cs` live in this repository
 and are excluded from the DLL. Mods link them:
 
 ```xml
@@ -262,6 +262,39 @@ applied once however many linked mods carry the file. Registration asks the live
 the prefab is already known, so two mods linking the file never double-register, and it is done
 again for every world. The prefab name `piece_ezomic_infusion` is permanent: a client that cannot
 resolve it makes ZNetScene discard every placed table without a word.
+
+**The table's window** is the optional second half of `InfusionTable`, in `shared/InfusionWindow.cs`
+(the same partial class). Link it beside `InfusionTable.cs` and the table opens its own window instead
+of the workbench's recipe list: two slots (base and infusing), the basin's liquid, a preview of the
+result, an Infuse button and an Empty basin button. A consumer that links only `InfusionTable.cs` still
+compiles and shows the vanilla crafting window.
+
+```xml
+<Compile Include="..\core\shared\InfusionWindow.cs" Link="shared\InfusionWindow.cs" />
+<!-- plus these references; the window is Unity UI and TextMeshPro, with vanilla's tooltip -->
+<Reference Include="UnityEngine.UIModule"><HintPath>$(ManagedDir)\UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
+<Reference Include="UnityEngine.UI"><HintPath>$(ManagedDir)\UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
+<Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(ManagedDir)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+<Reference Include="Unity.TextMeshPro"><HintPath>$(ManagedDir)\Unity.TextMeshPro.dll</HintPath><Private>false</Private></Reference>
+<Reference Include="assembly_guiutils"><HintPath>$(ManagedDir)\assembly_guiutils.dll</HintPath><Private>false</Private></Reference>
+```
+
+A player right-clicks an item in their inventory to place it in its slot (a click on the slot takes it
+out), fills the basin by using Resin, a Greydwarf Eye or Guck on the table as before, and presses Infuse.
+The window is vanilla's crafting panel rearranged: it keeps the frame, the title, the Craft button and its
+progress bar, hides the recipe list behind a CanvasGroup and draws the rest from clones of vanilla's own
+slot, heading, body text and tab button, so there is no art of its own. The craft itself is still vanilla's
+`OnCraftPressed` and `DoCrafting`, so the cost and the liquid rules are unchanged, and holding the
+multi-craft key does nothing at this table. The slots are one player's own choice and live in that client;
+the only shared state is the liquid on the ZDO, and Empty basin writes it the same way a fill does (claim
+the ZDO, then set), so anyone in range can use the table at once and the last write wins. The window closes
+when the table is out of reach or gone. Four Harmony patches (`InventoryGui.UpdateRecipe`,
+`OnCraftPressed`, `Hide` and `Humanoid.UseItem`) are applied once however many linked mods carry the file,
+and a failure in any of them switches the window off for the session and leaves vanilla's showing.
+`InfusionTable.WindowState()` reads the window as `key=value` text for a scenario. Controllers keep
+vanilla's behaviour where it carries over: the Craft button is vanilla's own, but placing items is by
+right click, which a pad reaches through the inventory's use button, and there is no pad design beyond
+that.
 
 Fixing any of these files means rebuilding every mod that links it.
 
