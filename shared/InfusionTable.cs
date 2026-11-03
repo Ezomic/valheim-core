@@ -70,7 +70,7 @@ namespace Ezomic.Shared
     /// disk and materials, none of which change between worlds. Each linking DLL has its own
     /// copy of these statics, which is exactly why nothing here is an API between mods.
     /// </summary>
-    public static class InfusionTable
+    public static partial class InfusionTable
     {
         /// <summary>The network identity. Never rename it.</summary>
         public const string PrefabName = "piece_ezomic_infusion";
@@ -825,6 +825,7 @@ namespace Ezomic.Shared
                     nameof(GateByLiquid));
                 PatchOnce(harmony, AccessTools.Method(typeof(Player), "ConsumeResources"),
                     nameof(EmptyBasinOnCraft));
+                InstallWindow(harmony);
             }
             catch (Exception e)
             {
@@ -832,6 +833,12 @@ namespace Ezomic.Shared
                     + "will not need it: " + e);
             }
         }
+
+        /// <summary>
+        /// Implemented by <c>InfusionWindow.cs</c> when a consumer links it, and compiled away
+        /// when it does not, so the window is optional and the table works without it.
+        /// </summary>
+        static partial void InstallWindow(Harmony harmony);
 
         private static void PatchOnce(Harmony harmony, System.Reflection.MethodBase original,
             string postfix)
